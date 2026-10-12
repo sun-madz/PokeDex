@@ -705,6 +705,19 @@ a.ring { display: block; border-radius: 20px; }
 .log-place svg { width: 15px; height: 15px; color: var(--red-hi); }
 .log-another { margin-top: 16px; }
 
+.radar { display: block; width: 100%; max-width: 380px; margin: 10px auto 0; overflow: visible; }
+.r-grid { fill: rgba(255, 255, 255, .025); stroke: rgba(255, 255, 255, .12); stroke-width: 1; }
+.r-grid.outer { fill: rgba(255, 255, 255, .05); stroke: rgba(255, 255, 255, .28); stroke-width: 1.5; }
+.r-axis { stroke: rgba(255, 255, 255, .12); stroke-width: 1; }
+.r-shape { fill: rgba(227, 53, 13, .42); stroke: var(--red-hi); stroke-width: 2.5; stroke-linejoin: round; }
+.r-dot { fill: var(--white); stroke: var(--red); stroke-width: 2; }
+.r-shape-wrap { animation: radarIn .9s var(--ease) both; }
+@keyframes radarIn { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.r-label { font-family: var(--font); }
+.r-name { fill: var(--muted); font-size: 13px; font-weight: 700; }
+.r-val { fill: var(--white); font-size: 17px; font-weight: 800; }
+.r-label.hi .r-name { fill: var(--red-hi); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

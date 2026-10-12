@@ -826,6 +826,46 @@
     });
   }
 
+  /* ---------- stats hexagon (game order, clockwise from the top) ---------- */
+  const RADAR_ORDER = [
+    ['hp', 'HP'], ['attack', 'Attack'], ['defense', 'Defense'],
+    ['speed', 'Speed'], ['special-defense', 'Sp. Def'], ['special-attack', 'Sp. Atk'],
+  ];
+  function statRadar(stats) {
+    const val = (k) => (stats.find((x) => x.key === k) || { value: 0 }).value;
+    const W = 340, H = 300, cx = W / 2, cy = 150, R = 92, CAP = 160; // CAP keeps shapes comparable between Pokémon
+    const pt = (i, r) => {
+      const a = (-90 + i * 60) * Math.PI / 180;
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    };
+    const poly = (r) => RADAR_ORDER.map((_, i) => pt(i, r).map((n) => n.toFixed(1)).join(',')).join(' ');
+    const values = RADAR_ORDER.map(([k]) => val(k));
+    const top = Math.max(...values);
+    const shape = RADAR_ORDER.map(([k], i) => pt(i, Math.max(0.08, Math.min(1, val(k) / CAP)) * R).map((n) => n.toFixed(1)).join(',')).join(' ');
+    const labels = RADAR_ORDER.map(([k, name], i) => {
+      const [x, y] = pt(i, R + 34);
+      const anchor = Math.abs(x - cx) < 4 ? 'middle' : x > cx ? 'start' : 'end';
+      const dx = anchor === 'start' ? -14 : anchor === 'end' ? 14 : 0;
+      const dy = i === 0 ? -8 : i === 3 ? 6 : 0;
+      const hi = val(k) === top;
+      return `<text x="${(x + dx).toFixed(1)}" y="${(y + dy).toFixed(1)}" text-anchor="${anchor}" class="r-label${hi ? ' hi' : ''}">
+                <tspan x="${(x + dx).toFixed(1)}" class="r-name">${name}</tspan>
+                <tspan x="${(x + dx).toFixed(1)}" dy="20" class="r-val">${val(k)}</tspan>
+              </text>`;
+    }).join('');
+    return `
+      <svg class="radar" viewBox="0 0 ${W} ${H}" role="img"
+        aria-label="${RADAR_ORDER.map(([k, n]) => `${n} ${val(k)}`).join(', ')}">
+        ${[1, 0.75, 0.5, 0.25].map((f) => `<polygon class="r-grid${f === 1 ? ' outer' : ''}" points="${poly(R * f)}"/>`).join('')}
+        ${RADAR_ORDER.map((_, i) => { const [x, y] = pt(i, R); return `<line class="r-axis" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/>`; }).join('')}
+        <g class="r-shape-wrap" style="transform-origin:${cx}px ${cy}px">
+          <polygon class="r-shape" points="${shape}"/>
+          ${RADAR_ORDER.map(([k], i) => { const [x, y] = pt(i, Math.max(0.08, Math.min(1, val(k) / CAP)) * R); return `<circle class="r-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"/>`; }).join('')}
+        </g>
+        ${labels}
+      </svg>`;
+  }
+
   /* ---------- pokémon page: every log of one species, newest first ---------- */
   async function renderDetail(id) {
     const focus = sightings.find((x) => x.id === id) || await DB.get(id).catch(() => null);
@@ -920,14 +960,7 @@
           <span class="pill-today">${icons.bolt} Base stat total</span>
           <b class="total">${total}</b>
         </div>
-        <div class="vbars" role="list">
-          ${p.stats.map((st) => `
-            <div class="vbar" role="listitem" aria-label="${STAT_SHORT[st.key] || st.key} ${st.value}">
-              <b>${st.value}</b>
-              <span class="col" style="--h:${Math.max(6, (st.value / maxStat) * 80).toFixed(1)}%"></span>
-            </div>`).join('')}
-        </div>
-        <div class="vbar-labels">${p.stats.map((st) => `<span>${STAT_SHORT[st.key] || st.key}</span>`).join('')}</div>
+        ${statRadar(p.stats)}
       </section>
 
       <section class="facts">
