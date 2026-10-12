@@ -67,14 +67,20 @@ const PokeMap = (() => {
     return map;
   }
 
-  function pin(src, { shiny = false, size = 46 } = {}) {
+  /* Pokémon GO-style marker: the Pokémon stands on the map with a shadow and a pulsing ring. */
+  function pin(src, { shiny = false, size = 64 } = {}) {
     const safe = src ? String(src).replace(/"/g, '&quot;') : '';
     return L.divIcon({
       className: 'poke-pin' + (shiny ? ' shiny' : ''),
-      html: `<span class="pin-head">${safe ? `<img src="${safe}" alt="">` : BALL}</span>`,
-      iconSize: [size, size + 12],
-      iconAnchor: [size / 2, size + 10],
-      popupAnchor: [0, -(size + 6)],
+      html: `<span class="go-pin" style="--s:${size}px">
+               <span class="go-ring"></span><span class="go-ring delay"></span>
+               <span class="go-shadow"></span>
+               ${safe ? `<img src="${safe}" alt="">` : `<span class="go-ball">${BALL}</span>`}
+               ${shiny ? '<span class="go-sparkle">✦</span>' : ''}
+             </span>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size * 0.9],
+      popupAnchor: [0, -size * 0.75],
     });
   }
 

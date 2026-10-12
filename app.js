@@ -175,6 +175,7 @@
     const [route, id] = parts;
     setTab(['add', 'dex', 'map', 'settings'].includes(route) ? route : 'home');
     if (route === 'map') return renderMap(id);
+    if (route === 'types') return renderTypes(id);
     if (!route) return renderHome();
     if (route === 'add') return renderForm();
     if (route === 'dex') return renderDex();
@@ -191,7 +192,7 @@
     const p = Math.max(0, Math.min(1, pct));
     const tag = href ? 'a' : 'div';
     return `
-      <${tag} class="ring ring-${tone}"${href ? ` href="${href}" aria-label="Open Pokédex"` : ''}>
+      <${tag} class="ring ring-${tone}"${href ? ` href="${href}" aria-label="Open ${label}"` : ''}>
         <div class="ring-dial">
           <svg class="ring-svg" viewBox="0 0 92 92" aria-hidden="true">
             <circle class="track" cx="46" cy="46" r="${r}"/>
@@ -222,7 +223,7 @@
         </header>
         <div class="rings">
           ${ring(dexPct, dexLabel, 'Pokédex', 'white', icons.book, '#/dex')}
-          ${ring(types / 18, `${types}/18`, 'Types', 'red', icons.bolt)}
+          ${ring(types / 18, `${types}/18`, 'Types', 'red', icons.bolt, '#/types')}
           ${ring(gens / 9, `${gens}/9`, 'Generations', 'soft', icons.layers)}
         </div>
       </section>
@@ -244,7 +245,17 @@
 
       <div class="section-head">
         <h2>Your Sightings</h2>
-        <span class="count">${sightings.length}</span>
+        <span class="count" id="listCount">${sightings.length}</span>
+      </div>
+      <div class="date-filter">
+        <div class="gen-chips" id="dateChips" aria-label="Filter by date seen">
+          <button type="button" class="sort-chip" id="sortBtn" aria-label="Change sort order">${homeFilter.sort === 'new' ? '↓ Newest' : '↑ Oldest'}</button>
+          ${DATE_RANGES.map(([k, l]) => `<button type="button" data-range="${k}" class="${homeFilter.range === k ? 'on' : ''}">${l}</button>`).join('')}
+        </div>
+        <div class="date-custom" id="dateCustom" ${homeFilter.range === 'custom' ? '' : 'hidden'}>
+          <label>From<input type="date" id="dFrom" value="${esc(homeFilter.from)}"></label>
+          <label>To<input type="date" id="dTo" value="${esc(homeFilter.to)}"></label>
+        </div>
       </div>
       <div id="list" class="stack"></div>
     `);
@@ -253,30 +264,83 @@
       document.querySelectorAll('.ring .bar').forEach((b) => b.setAttribute('stroke-dashoffset', b.dataset.off));
     });
 
-    drawList(sightings);
+    let query = '';
+    const update = () => {
+      const [from, to] = rangeBounds();
+      const items = sightings
+        .filter((s) => {
+          const d = s.seenAt || '';
+          if (from && d < from) return false;
+          if (to && d > to) return false;
+          if (!query) return true;
+          return [s.pokemon.name, s.pokemon.slug, s.nickname, s.description, s.location, s.pokemon.region, ...s.pokemon.types]
+            .join(' ').toLowerCase().includes(query);
+        })
+        .sort((a, b) => {
+          const c = (a.seenAt || '').localeCompare(b.seenAt || '') || (a.createdAt || 0) - (b.createdAt || 0);
+          return homeFilter.sort === 'new' ? -c : c;
+        });
+      $('#listCount').textContent = items.length;
+      drawList(items, !!(query || from || to));
+    };
+    update();
     drawMiniMap($('#homeMap'), sightings.filter(hasCoords));
 
     $('#searchBtn').addEventListener('click', () => {
       const w = $('#searchWrap');
       w.classList.toggle('hidden');
       if (!w.classList.contains('hidden')) $('#searchInput').focus();
-      else { $('#searchInput').value = ''; drawList(sightings); }
+      else { $('#searchInput').value = ''; query = ''; update(); }
     });
     $('#searchInput').addEventListener('input', (e) => {
-      const q = e.target.value.trim().toLowerCase();
-      if (!q) return drawList(sightings);
-      drawList(sightings.filter((s) => [
-        s.pokemon.name, s.pokemon.slug, s.nickname, s.description, s.location, s.pokemon.region,
-        ...s.pokemon.types,
-      ].join(' ').toLowerCase().includes(q)), true);
+      query = e.target.value.trim().toLowerCase();
+      update();
     });
+    $('#dateChips').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-range]');
+      if (!b) return;
+      homeFilter.range = b.dataset.range;
+      $('#dateChips').querySelectorAll('[data-range]').forEach((x) => x.classList.toggle('on', x === b));
+      $('#dateCustom').hidden = homeFilter.range !== 'custom';
+      update();
+    });
+    $('#sortBtn').addEventListener('click', () => {
+      homeFilter.sort = homeFilter.sort === 'new' ? 'old' : 'new';
+      $('#sortBtn').textContent = homeFilter.sort === 'new' ? '↓ Newest' : '↑ Oldest';
+      update();
+    });
+    ['dFrom', 'dTo'].forEach((idName) => $('#' + idName).addEventListener('change', (e) => {
+      homeFilter[idName === 'dFrom' ? 'from' : 'to'] = e.target.value;
+      update();
+    }));
+  }
+
+  /* ---------- date filter helpers ---------- */
+  const DATE_RANGES = [['all', 'All time'], ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['year', 'This year'], ['custom', 'Custom']];
+  const homeFilter = { range: 'all', from: '', to: '', sort: 'new' };
+  const isoDaysAgo = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10);
+  };
+  function rangeBounds() {
+    const today = todayISO();
+    switch (homeFilter.range) {
+      case 'today': return [today, today];
+      case 'week': return [isoDaysAgo(6), today];
+      case 'month': return [isoDaysAgo(29), today];
+      case 'year': return [today.slice(0, 4) + '-01-01', today];
+      case 'custom': return [homeFilter.from || '', homeFilter.to || ''];
+      default: return ['', ''];
+    }
   }
 
   function drawList(items, filtered = false) {
     const list = $('#list');
     if (!items.length) {
       list.innerHTML = filtered
-        ? `<div class="empty"><h3>No matches</h3><p>Try a different name, type or place.</p></div>`
+        ? `<div class="empty"><h3>No sightings here</h3><p>Nothing matches this search or date range — try widening it.</p></div>`
         : `<div class="empty">
              <div class="ball">${POKEBALL}</div>
              <h3>No sightings yet</h3>
@@ -542,6 +606,79 @@
     };
   }
 
+  /* ---------- types ---------- */
+  const ALL_TYPES = ['normal', 'fire', 'water', 'grass', 'electric', 'ice', 'fighting', 'poison', 'ground',
+    'flying', 'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy'];
+  const inkOn = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    const l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    return l > 0.62 ? '#141416' : '#ffffff';
+  };
+
+  function renderTypes(selected) {
+    // newest sighting of each species, grouped by type
+    const latest = new Map();
+    sightings.forEach((s) => { if (!latest.has(s.pokemon.id)) latest.set(s.pokemon.id, s); });
+    const byType = {};
+    ALL_TYPES.forEach((t) => { byType[t] = []; });
+    latest.forEach((s) => s.pokemon.types.forEach((t) => byType[t] && byType[t].push(s)));
+    const found = ALL_TYPES.filter((t) => byType[t].length).length;
+    let current = ALL_TYPES.includes(selected) ? selected : null;
+
+    mount(`
+      <header class="topbar">
+        <a class="icon-btn" href="#/" aria-label="Back">${icons.back}</a>
+        <span class="topbar-title">Types</span>
+        <span class="icon-btn spacer" aria-hidden="true"></span>
+      </header>
+      <h1 class="big-name">Pokémon<br>types</h1>
+      <div class="dex-progress">
+        <div class="dex-progress-top"><b>${found}<small> / 18</small></b><span class="muted">types sighted</span></div>
+        <div class="meter"><i style="--p:${(found / 18 * 100).toFixed(1)}%"></i></div>
+      </div>
+
+      <div class="type-grid" role="list">
+        ${ALL_TYPES.map((t) => {
+          const c = TYPE_COLORS[t];
+          const n = byType[t].length;
+          return `<button type="button" role="listitem" class="type-tile ${n ? 'found' : 'missing'}" data-type="${t}"
+            style="--c:${c};--ink:${inkOn(c)}" aria-label="${cap(t)}: ${n} sighted">
+            <span class="type-name">${cap(t)}</span><span class="type-count">${n}</span>
+          </button>`;
+        }).join('')}
+      </div>
+
+      <section id="typeResults" class="type-results"></section>
+    `);
+
+    const show = (t, scroll) => {
+      current = t;
+      view.querySelectorAll('.type-tile').forEach((b) => b.classList.toggle('on', b.dataset.type === t));
+      const box = $('#typeResults');
+      if (!t) { box.innerHTML = `<p class="muted type-tip">Tap a type to see the Pokémon you've sighted.</p>`; return; }
+      const list = byType[t].slice().sort((a, b) => a.pokemon.id - b.pokemon.id);
+      box.innerHTML = `
+        <div class="section-head">
+          <h2><span class="type-dot big" style="--c:${TYPE_COLORS[t]}"></span>${cap(t)}</h2>
+          <span class="count">${list.length}</span>
+        </div>
+        ${list.length ? `<div class="dex-grid">${list.map((s) => `
+          <a class="dex-cell seen" href="#/s/${encodeURIComponent(s.id)}" style="background:${TYPE_COLORS[t]}">
+            <span class="dex-num" style="color:${inkOn(TYPE_COLORS[t])}">${dexNo(s.pokemon.id)}</span>
+            <img src="${esc(artOf(s))}" alt="" loading="lazy">
+            <b style="color:${inkOn(TYPE_COLORS[t])}">${esc(s.pokemon.name)}</b>
+          </a>`).join('')}</div>`
+          : `<div class="empty"><h3>No ${cap(t)} types yet</h3><p>Keep exploring — your first ${cap(t)}-type sighting will show up here.</p></div>`}`;
+      history.replaceState(null, '', '#/types/' + t);
+      if (scroll) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    show(current, false);
+    view.querySelector('.type-grid').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-type]');
+      if (b) show(b.dataset.type, true);
+    });
+  }
+
   /* ---------- maps ---------- */
   function addPins(map, list, { interactive = true } = {}) {
     const byId = {};
@@ -553,7 +690,7 @@
       used.set(key, n + 1);
       const angle = n * 2.4;
       const ll = n ? [s.lat + Math.cos(angle) * 0.00012 * Math.sqrt(n), s.lng + Math.sin(angle) * 0.00012 * Math.sqrt(n)] : [s.lat, s.lng];
-      const m = L.marker(ll, { icon: PokeMap.pin(artOf(s), { shiny: s.shiny, size: interactive ? 46 : 34 }), interactive, keyboard: interactive });
+      const m = L.marker(ll, { icon: PokeMap.pin(artOf(s), { shiny: s.shiny, size: interactive ? 68 : 46 }), interactive, keyboard: interactive });
       if (interactive) {
         m.bindPopup(`
           <a class="map-pop" href="#/s/${encodeURIComponent(s.id)}">
