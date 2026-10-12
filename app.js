@@ -4,7 +4,6 @@
 
   const $ = (s, r = document) => r.querySelector(s);
   const view = $('#view');
-  const TRAINER_KEY = 'pokelog:trainer';
   const DEX_TOTAL = 1025;
   let sightings = [];
 
@@ -31,6 +30,8 @@
     upload: ic('<path d="M12 20V9M7 14l5-5 5 5M5 4h14"/>'),
     check: ic('<path d="m5 12 5 5 9-10"/>'),
     x: ic('<path d="M6 6l12 12M18 6 6 18"/>'),
+    up: ic('<path d="M12 19V5M6 11l6-6 6 6"/>'),
+    dice: ic('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="15" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1" fill="currentColor"/>'),
     sparkle: ic('<path d="M12 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7z"/>'),
   };
 
@@ -63,9 +64,8 @@
   };
   const typeChip = (t) =>
     `<span class="chip type" style="--c:${TYPE_COLORS[t] || '#999'}"><span class="type-dot"></span>${cap(t)}</span>`;
-  const trainerName = () => {
-    try { return localStorage.getItem(TRAINER_KEY) || 'Trainer'; } catch (_) { return 'Trainer'; }
-  };
+  const trainerName = () => Trainer.load().name;
+  let viewCleanup = null; // screens that add page-level listeners register a teardown here
 
   async function refresh() {
     sightings = (await DB.all()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -156,10 +156,12 @@
   }
 
   function router() {
+    if (viewCleanup) { viewCleanup(); viewCleanup = null; }
     const parts = (location.hash.slice(1) || '/').split('/').filter(Boolean);
     window.scrollTo(0, 0);
     const [route, id] = parts;
-    setTab(route === 'add' || route === 'dex' || route === 'settings' ? route : 'home');
+    setTab(['add', 'dex', 'trainer', 'settings'].includes(route) ? route : 'home');
+    if (route === 'trainer') return renderTrainer();
     if (!route) return renderHome();
     if (route === 'add') return renderForm();
     if (route === 'dex') return renderDex();
@@ -199,10 +201,10 @@
     mount(`
       <section class="hero-panel">
         <header class="top">
-          <h1 class="hello">Hi, ${esc(trainerName())} <span class="wave">👋</span></h1>
+          <h1 class="hello">Hi, ${esc(trainerName())}</h1>
           <div class="top-actions">
             <button class="icon-btn" id="searchBtn" aria-label="Search sightings">${icons.search}</button>
-            <a class="icon-btn" href="#/settings" aria-label="Settings">${icons.sliders}</a>
+            <a class="icon-btn avatar-btn" href="#/trainer" aria-label="Trainer profile"><span class="mini-trainer" style="background-image:url('${Trainer.url(Trainer.load().look)}')"></span></a>
           </div>
         </header>
         <div class="rings">
@@ -445,12 +447,221 @@
         x.setAttribute('aria-selected', x === b);
       });
       draw();
+      window.dispatchEvent(new Event('scroll'));
     }));
     view.querySelectorAll('[data-gen]').forEach((b) => b.addEventListener('click', () => {
       dexFilter.gen = Number(b.dataset.gen);
       view.querySelectorAll('[data-gen]').forEach((x) => x.classList.toggle('on', x === b));
       draw();
+      window.dispatchEvent(new Event('scroll'));
     }));
+
+    /* scroll rail you can drag through the list + back-to-top button */
+    const rail = document.createElement('div');
+    rail.className = 'scrubber';
+    rail.setAttribute('aria-hidden', 'true');
+    rail.innerHTML = '<div class="scrub-track"></div><div class="scrub-thumb"><span class="scrub-bubble glass"></span></div>';
+    const topBtn = document.createElement('button');
+    topBtn.className = 'to-top glass';
+    topBtn.innerHTML = `${icons.up}<span>Top</span>`;
+    topBtn.setAttribute('aria-label', 'Back to top of the Pokédex');
+    document.body.append(rail, topBtn);
+
+    const thumb = rail.querySelector('.scrub-thumb');
+    const bubble = rail.querySelector('.scrub-bubble');
+    const maxScroll = () => Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+    const labelAt = (f) => {
+      const shown = list.filter((m) => {
+        if (dexFilter.gen && Api.genOfId(m.id) !== dexFilter.gen) return false;
+        if (dexFilter.status === 'seen') return seenMap.has(m.id);
+        if (dexFilter.status === 'missing') return !seenMap.has(m.id);
+        return true;
+      });
+      if (!shown.length) return '';
+      return dexNo(shown[Math.min(shown.length - 1, Math.round(f * (shown.length - 1)))].id);
+    };
+    const sync = () => {
+      const f = Math.min(1, window.scrollY / maxScroll());
+      thumb.style.transform = `translateY(${f * (rail.clientHeight - thumb.offsetHeight)}px)`;
+      if (rail.classList.contains('drag')) bubble.textContent = labelAt(f);
+      rail.classList.toggle('show', document.documentElement.scrollHeight > window.innerHeight * 1.6);
+      topBtn.classList.toggle('show', window.scrollY > 500);
+    };
+    const seek = (clientY) => {
+      const r = rail.getBoundingClientRect();
+      const th = thumb.offsetHeight;
+      const f = Math.max(0, Math.min(1, (clientY - r.top - th / 2) / (r.height - th)));
+      window.scrollTo(0, f * maxScroll());
+      bubble.textContent = labelAt(f);
+    };
+    let dragging = false;
+    rail.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      rail.setPointerCapture(e.pointerId);
+      rail.classList.add('drag');
+      seek(e.clientY);
+      e.preventDefault();
+    });
+    rail.addEventListener('pointermove', (e) => { if (dragging) seek(e.clientY); });
+    const endDrag = () => { dragging = false; rail.classList.remove('drag'); };
+    rail.addEventListener('pointerup', endDrag);
+    rail.addEventListener('pointercancel', endDrag);
+    topBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+
+    window.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+    requestAnimationFrame(sync);
+    viewCleanup = () => {
+      window.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+      rail.remove();
+      topBtn.remove();
+    };
+  }
+
+  /* ---------- trainer ---------- */
+  const LOOK_LABELS = {
+    skin: 'Skin tone', hairStyle: 'Hair style', hairColor: 'Hair colour', hat: 'Hat', hatColor: 'Hat colour',
+    topColor: 'Top', bottomStyle: 'Bottoms', bottomColor: 'Bottoms colour', shoeColor: 'Shoes', bag: 'Bag', bagColor: 'Bag colour',
+  };
+  const LOOK_ORDER = ['skin', 'hairStyle', 'hairColor', 'hat', 'hatColor', 'topColor', 'bottomStyle', 'bottomColor', 'shoeColor', 'bag', 'bagColor'];
+  const platformOf = (t) =>
+    ['water', 'ice'].includes(t) ? 'water'
+      : ['fire', 'ground', 'rock', 'fighting', 'steel'].includes(t) ? 'dirt'
+      : ['ghost', 'dark', 'poison', 'psychic', 'dragon', 'fairy'].includes(t) ? 'mystic'
+      : 'grass';
+
+  function renderTrainer() {
+    const prof = Trainer.load();
+
+    // one entry per species, newest sighting first
+    const species = [];
+    const ids = new Set();
+    for (const s of sightings) {
+      if (!ids.has(s.pokemon.id)) { ids.add(s.pokemon.id); species.push(s); }
+    }
+    const partnerOf = () => (prof.partnerId ? species.find((s) => s.pokemon.id === prof.partnerId) : null);
+
+    const typeCount = {};
+    sightings.forEach((s) => s.pokemon.types.forEach((t) => { typeCount[t] = (typeCount[t] || 0) + 1; }));
+    const favType = Object.keys(typeCount).sort((a, b) => typeCount[b] - typeCount[a])[0];
+    const rarest = sightings.slice().sort((a, b) =>
+      (b.pokemon.rarity.tier - a.pokemon.rarity.tier) || (a.pokemon.captureRate - b.pokemon.captureRate))[0];
+    const since = sightings.map((s) => s.seenAt).filter(Boolean).sort()[0];
+
+    const stageHTML = () => {
+      const ps = partnerOf();
+      return `
+        <div class="stage-inner plat-${ps ? platformOf(ps.pokemon.types[0]) : 'grass'}">
+          <span class="stage-tag glass" id="stageName">${esc(prof.name)}</span>
+          ${ps ? `<span class="stage-tag right glass">Partner · ${esc(ps.pokemon.name)}</span>` : ''}
+          <div class="platform"></div>
+          <div class="actors">
+            <img class="trainer-img" src="${Trainer.url(prof.look)}" alt="Your trainer">
+            ${ps ? `<img class="partner-img" src="${Api.spriteUrl(ps.pokemon.id, ps.shiny)}" alt="${esc(ps.pokemon.name)}" onerror="this.onerror=null;${artOf(ps) ? `this.src='${esc(artOf(ps))}';this.classList.add('art')` : `this.style.visibility='hidden'`}">` : ''}
+          </div>
+        </div>`;
+    };
+
+    const customHTML = () => LOOK_ORDER.map((k) => {
+      const v = prof.look[k];
+      const body = Trainer.STYLES[k]
+        ? `<div class="opt-chips">${Trainer.STYLES[k].map(([val, label]) =>
+            `<button type="button" data-k="${k}" data-v="${val}" class="${v === val ? 'on' : ''}">${label}</button>`).join('')}</div>`
+        : `<div class="swatches">${Trainer.SWATCHES[k].map((c) =>
+            `<button type="button" data-k="${k}" data-v="${c}" class="sw ${String(v).toLowerCase() === c.toLowerCase() ? 'on' : ''}" style="--c:${c}" aria-label="${LOOK_LABELS[k]} ${c}"></button>`).join('')}</div>`;
+      return `<div class="opt" data-opt="${k}"><span class="opt-label">${LOOK_LABELS[k]}</span>${body}</div>`;
+    }).join('');
+
+    mount(`<div id="trainerRoot">
+      <header class="topbar">
+        <span class="icon-btn spacer" aria-hidden="true"></span>
+        <span class="topbar-title">Trainer</span>
+        <span class="icon-btn spacer" aria-hidden="true"></span>
+      </header>
+
+      <div class="stage" id="stage">${stageHTML()}</div>
+
+      <div class="field name-field">
+        <label for="tname">Trainer name</label>
+        <input id="tname" maxlength="20" value="${esc(prof.name)}">
+      </div>
+
+      <section class="facts trainer-facts">
+        <div class="fact"><span>Sightings</span><b>${sightings.length}</b></div>
+        <div class="fact"><span>Species</span><b>${species.length}</b></div>
+        <div class="fact"><span>Shiny finds</span><b>${sightings.filter((s) => s.shiny).length}</b></div>
+        <div class="fact"><span>Trainer since</span><b>${since ? fmtDate(since) : '—'}</b></div>
+        <div class="fact"><span>Favourite type</span><b>${favType ? cap(favType) : '—'}</b></div>
+        <div class="fact"><span>Rarest find</span><b>${rarest ? esc(rarest.pokemon.name) : '—'}</b></div>
+      </section>
+
+      <section class="panel">
+        <h3>Partner Pokémon</h3>
+        ${species.length
+          ? `<p>Choose a Pokémon you've sighted to stand next to you.</p>
+             <div class="partner-grid">
+               <button type="button" class="partner-opt ${partnerOf() ? '' : 'on'}" data-pid="">${icons.x}<b>None</b></button>
+               ${species.map((s) => `
+                 <button type="button" class="partner-opt ${prof.partnerId === s.pokemon.id ? 'on' : ''}" data-pid="${s.pokemon.id}">
+                   <img src="${Api.spriteUrl(s.pokemon.id, s.shiny)}" alt="" loading="lazy" onerror="this.onerror=null;${artOf(s) ? `this.src='${esc(artOf(s))}'` : `this.style.visibility='hidden'`}">
+                   <b>${esc(s.pokemon.name)}</b>
+                 </button>`).join('')}
+             </div>`
+          : `<p>Log a sighting first, then pick it as your partner.</p><a class="btn btn-red" href="#/add">${icons.camera} Log a sighting</a>`}
+      </section>
+
+      <section class="panel custom">
+        <div class="custom-head">
+          <h3>Customise your look</h3>
+          <button type="button" class="mini-btn" id="randBtn">${icons.dice} Randomise</button>
+        </div>
+        <div id="customOpts">${customHTML()}</div>
+      </section>
+    </div>`);
+
+    const redrawStage = () => { $('#stage').innerHTML = stageHTML(); };
+    const syncDeps = () => {
+      const hatC = view.querySelector('[data-opt="hatColor"]');
+      const bagC = view.querySelector('[data-opt="bagColor"]');
+      if (hatC) hatC.hidden = prof.look.hat === 'none';
+      if (bagC) bagC.hidden = prof.look.bag === 'none';
+    };
+    syncDeps();
+
+    $('#tname').addEventListener('input', (e) => {
+      prof.name = e.target.value.trim() || 'Trainer';
+      Trainer.save(prof);
+      const tag = $('#stageName');
+      if (tag) tag.textContent = prof.name;
+    });
+
+    $('#trainerRoot').addEventListener('click', (e) => {
+      const opt = e.target.closest('[data-k]');
+      if (opt) {
+        prof.look[opt.dataset.k] = opt.dataset.v;
+        Trainer.save(prof);
+        view.querySelectorAll(`[data-k="${opt.dataset.k}"]`).forEach((b) => b.classList.toggle('on', b === opt));
+        syncDeps();
+        redrawStage();
+        return;
+      }
+      const p = e.target.closest('[data-pid]');
+      if (p) {
+        prof.partnerId = p.dataset.pid ? Number(p.dataset.pid) : null;
+        Trainer.save(prof);
+        view.querySelectorAll('[data-pid]').forEach((b) => b.classList.toggle('on', b === p));
+        redrawStage();
+      }
+    });
+
+    $('#randBtn').addEventListener('click', () => {
+      prof.look = Trainer.randomLook();
+      Trainer.save(prof);
+      $('#customOpts').innerHTML = customHTML();
+      syncDeps();
+      redrawStage();
+    });
   }
 
   /* ---------- detail ---------- */
@@ -835,16 +1046,9 @@
         <span class="topbar-title">Settings</span>
         <span class="icon-btn spacer" aria-hidden="true"></span>
       </header>
-      <h1 class="big-name">Trainer<br>settings</h1>
+      <h1 class="big-name">Settings</h1>
 
       <div class="settings">
-        <div class="panel">
-          <div class="field">
-            <label for="trainer">Trainer name</label>
-            <input id="trainer" maxlength="24" value="${esc(trainerName())}">
-          </div>
-        </div>
-
         <div class="panel">
           <h3>Your data</h3>
           <p>${sightings.length} sighting${sightings.length === 1 ? '' : 's'} saved in this browser. They stay when you close the app, but only on this device. Export a backup to move them or keep them safe.</p>
@@ -864,10 +1068,6 @@
         <p class="credit">Pokémon data &amp; artwork from <a href="https://pokeapi.co" target="_blank" rel="noopener">PokéAPI</a>. Pokémon is © Nintendo / Game Freak / The Pokémon Company. Fan project, not affiliated.</p>
       </div>
     `);
-
-    $('#trainer').addEventListener('input', (e) => {
-      try { localStorage.setItem(TRAINER_KEY, e.target.value.trim() || 'Trainer'); } catch (_) { /* ignore */ }
-    });
 
     $('#exportBtn').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify({ app: 'pokedex', version: 1, exportedAt: new Date().toISOString(), sightings }, null, 0)], { type: 'application/json' });

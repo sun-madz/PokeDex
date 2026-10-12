@@ -146,8 +146,8 @@ const Api = (() => {
     return info;
   }
 
-  const spriteUrl = (id) =>
-    `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
+  const spriteUrl = (id, shiny = false) =>
+    `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${shiny ? 'shiny/' : ''}${id}.png`;
 
   /* National Dex ranges for each generation */
   const GEN_RANGES = [[1, 151], [152, 251], [252, 386], [387, 493], [494, 649], [650, 721], [722, 809], [810, 905], [906, 1025]];

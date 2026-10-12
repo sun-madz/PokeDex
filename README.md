@@ -12,6 +12,8 @@ A personal Pokémon sighting log. Upload a photo, type the Pokémon's name, and 
 - Edit or delete sightings; search your log
 - Pokédex tab: every Pokémon by National Dex number — sighted ones in full colour, unsighted ones as black silhouettes; filter by sighted/missing and generation
 - Pokédex entry card under your photo with a personality description (built from type, stats, friendliness, rarity and habitat) plus the official field notes
+- Trainer screen: an original pixel-art trainer you can customise (skin, hair style & colour, hat, top, bottoms, shoes, bag, or randomise), standing on a platform next to a partner Pokémon picked from your sightings, plus your trainer stats
+- Pokédex scroll rail (drag to jump through the list, shows the Dex number) and a Top button
 - Progress rings: Pokédex %, types seen, generations seen
 - Data saved on-device (IndexedDB) and works offline once logged
 - Export / import a JSON backup
@@ -25,6 +27,7 @@ A personal Pokémon sighting log. Upload a photo, type the Pokémon's name, and 
 | `app.js` | Screens: home, log/edit, sighting detail, settings |
 | `api.js` | PokéAPI lookups and rarity logic |
 | `db.js` | Saves sightings in the browser (IndexedDB) |
+| `trainer.js` | Draws the customisable trainer sprite and saves your trainer profile |
 | `manifest.webmanifest`, `favicon.svg` | App icon / "Add to Home Screen" |
 
 ## Preview it
