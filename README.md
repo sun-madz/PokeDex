@@ -1,4 +1,4 @@
-# PokéLog
+# PokéDex
 
 A personal Pokémon sighting log. Upload a photo, type the Pokémon's name, and the app pulls in its official artwork, base stats, types, generation, region, rarity, abilities and Pokédex entry automatically. Your sightings are saved in your browser, so they're still there when you close and reopen the app.
 
