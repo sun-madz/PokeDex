@@ -177,7 +177,7 @@
     if (route === 'map') return renderMap(id);
     if (route === 'types') return renderTypes(id);
     if (!route) return renderHome();
-    if (route === 'add') return renderForm();
+    if (route === 'add') return renderForm(null, id);
     if (route === 'dex') return renderDex();
     if (route === 'edit') return renderForm(id);
     if (route === 's') return renderDetail(id);
@@ -244,7 +244,7 @@
       </a>
 
       <div class="section-head">
-        <h2>Your Sightings</h2>
+        <h2>Your Pokémon</h2>
         <span class="count" id="listCount">${sightings.length}</span>
       </div>
       <div class="date-filter">
@@ -267,7 +267,7 @@
     let query = '';
     const update = () => {
       const [from, to] = rangeBounds();
-      const items = sightings
+      const logs = sightings
         .filter((s) => {
           const d = s.seenAt || '';
           if (from && d < from) return false;
@@ -276,10 +276,22 @@
           return [s.pokemon.name, s.pokemon.slug, s.nickname, s.description, s.location, s.pokemon.region, ...s.pokemon.types]
             .join(' ').toLowerCase().includes(query);
         })
-        .sort((a, b) => {
-          const c = (a.seenAt || '').localeCompare(b.seenAt || '') || (a.createdAt || 0) - (b.createdAt || 0);
-          return homeFilter.sort === 'new' ? -c : c;
-        });
+        .sort(byDateDesc);
+      // group the matching logs by Pokémon
+      const groups = new Map();
+      logs.forEach((s) => {
+        const g = groups.get(s.pokemon.id);
+        if (g) g.logs.push(s); else groups.set(s.pokemon.id, { logs: [s] });
+      });
+      const items = [...groups.values()].map((g) => ({
+        latest: g.logs[0],
+        oldest: g.logs[g.logs.length - 1],
+        matching: g.logs,
+        total: sightings.filter((x) => x.pokemon.id === g.logs[0].pokemon.id).length,
+      }));
+      items.sort((a, b) => (homeFilter.sort === 'new'
+        ? byDateDesc(a.latest, b.latest)
+        : (a.oldest.seenAt || '').localeCompare(b.oldest.seenAt || '') || (a.oldest.createdAt || 0) - (b.oldest.createdAt || 0)));
       $('#listCount').textContent = items.length;
       drawList(items, !!(query || from || to));
     };
@@ -316,6 +328,7 @@
   }
 
   /* ---------- date filter helpers ---------- */
+  function byDateDesc(a, b) { return (b.seenAt || '').localeCompare(a.seenAt || '') || (b.createdAt || 0) - (a.createdAt || 0); }
   const DATE_RANGES = [['all', 'All time'], ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['year', 'This year'], ['custom', 'Custom']];
   const homeFilter = { range: 'all', from: '', to: '', sort: 'new' };
   const isoDaysAgo = (n) => {
@@ -350,8 +363,10 @@
       return;
     }
     const variants = ['v-red', 'v-white', 'v-dark'];
-    list.innerHTML = items.map((s, i) => {
+    list.innerHTML = items.map((g, i) => {
+      const s = g.latest;
       const p = s.pokemon;
+      const withPhoto = g.matching.find((x) => x.photo);
       const v = i === 0 ? 'v-red' : variants[1 + ((i - 1) % 2)];
       return `
         <a class="s-card ${v}" href="#/s/${encodeURIComponent(s.id)}">
@@ -360,14 +375,16 @@
               <h3>${esc(p.name)}</h3>
               ${s.nickname ? `<p class="s-nick">“${esc(s.nickname)}”</p>` : `<p class="s-nick">${dexNo(p.id)}</p>`}
             </div>
-            ${s.photo ? `<span class="s-thumb"><img src="${s.photo}" alt="" loading="lazy"></span>` : ''}
+            ${withPhoto ? `<span class="s-thumb"><img src="${withPhoto.photo}" alt="" loading="lazy">${g.total > 1 ? `<em class="s-count">×${g.total}</em>` : ''}</span>`
+              : g.total > 1 ? `<span class="s-thumb s-thumb-count"><em class="s-count">×${g.total}</em></span>` : ''}
           </div>
           <img class="s-art" src="${esc(artOf(s))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
           <div class="s-foot">
             <div class="s-meta">
               <span class="tag">Gen ${p.genRoman}</span>
               <span class="tag">${esc(p.rarity.label)}</span>
-              ${s.shiny ? '<span class="tag">✦ Shiny</span>' : ''}
+              ${g.matching.some((x) => x.shiny) ? '<span class="tag">✦ Shiny</span>' : ''}
+              ${g.total > 1 ? `<span class="tag">${g.total} sightings</span>` : ''}
             </div>
             <span class="go-pill">${fmtDate(s.seenAt) || 'View'} <span class="go">${icons.play}</span></span>
           </div>
@@ -458,7 +475,7 @@
 
   async function renderDex() {
     const seenMap = new Map(); // id -> { s: latest sighting, count }
-    for (const s of sightings) {
+    for (const s of sightings.slice().sort(byDateDesc)) {
       const e = seenMap.get(s.pokemon.id);
       if (e) e.count++; else seenMap.set(s.pokemon.id, { s, count: 1 });
     }
@@ -618,7 +635,7 @@
   function renderTypes(selected) {
     // newest sighting of each species, grouped by type
     const latest = new Map();
-    sightings.forEach((s) => { if (!latest.has(s.pokemon.id)) latest.set(s.pokemon.id, s); });
+    sightings.slice().sort(byDateDesc).forEach((s) => { if (!latest.has(s.pokemon.id)) latest.set(s.pokemon.id, s); });
     const byType = {};
     ALL_TYPES.forEach((t) => { byType[t] = []; });
     latest.forEach((s) => s.pokemon.types.forEach((t) => byType[t] && byType[t].push(s)));
@@ -809,33 +826,36 @@
     });
   }
 
-  /* ---------- detail ---------- */
+  /* ---------- pokémon page: every log of one species, newest first ---------- */
   async function renderDetail(id) {
-    const s = sightings.find((x) => x.id === id) || await DB.get(id).catch(() => null);
-    if (!s) {
+    const focus = sightings.find((x) => x.id === id) || await DB.get(id).catch(() => null);
+    if (!focus) {
       mount(`<header class="topbar"><a class="icon-btn" href="#/" aria-label="Back">${icons.back}</a></header>
         <div class="empty"><h3>Sighting not found</h3><p>It may have been deleted.</p><a class="btn btn-red" href="#/">Back home</a></div>`);
       return;
     }
-    const p = s.pokemon;
+    const logs = sightings.filter((x) => x.pokemon.id === focus.pokemon.id).sort(byDateDesc);
+    if (!logs.length) logs.push(focus);
+    const p = logs[0].pokemon;
     const total = p.stats.reduce((a, b) => a + b.value, 0);
     const maxStat = Math.max(150, ...p.stats.map((x) => x.value));
+    const pinned = logs.filter(hasCoords);
+    const first = logs[logs.length - 1];
 
     mount(`
       <header class="topbar">
         <a class="icon-btn" href="#/" aria-label="Back">${icons.back}</a>
-        <span class="topbar-title">Sighting</span>
-        <a class="icon-btn" href="#/edit/${encodeURIComponent(s.id)}" aria-label="Edit sighting">${icons.edit}</a>
+        <span class="topbar-title">${dexNo(p.id)}</span>
+        <a class="icon-btn" href="#/add/${encodeURIComponent(p.slug)}" aria-label="Log another ${esc(p.name)}">${icons.camera}</a>
       </header>
 
       <h1 class="big-name">${esc(p.name)}</h1>
-      ${s.nickname ? `<p class="nickname">“${esc(s.nickname)}”</p>` : ''}
       ${p.genus ? `<p class="genus">The ${esc(p.genus)}</p>` : ''}
 
       <div class="art-card">
-        <img src="${esc(artOf(s))}" alt="Official artwork of ${esc(p.name)}" onerror="this.style.visibility='hidden'">
+        <img src="${esc(artOf(focus))}" alt="Official artwork of ${esc(p.name)}" onerror="this.style.visibility='hidden'">
         <span class="float-tag dex-tag glass">${dexNo(p.id)}</span>
-        ${s.shiny ? `<span class="float-tag shiny-tag glass">✦ Shiny</span>` : ''}
+        ${logs.some((l) => l.shiny) ? `<span class="float-tag shiny-tag glass">✦ Shiny seen</span>` : ''}
       </div>
 
       <div class="chip-row">
@@ -845,24 +865,45 @@
       </div>
 
       <section class="block">
-        <div class="block-head"><h2>Your photo</h2><span class="muted">${fmtDate(s.seenAt)}</span></div>
-        ${s.photo
-          ? `<figure class="photo-card"><img src="${s.photo}" alt="Your photo of ${esc(p.name)}"></figure>`
-          : `<a class="photo-empty" href="#/edit/${encodeURIComponent(s.id)}">${icons.camera}<span>Add your photo</span></a>`}
+        <div class="block-head">
+          <h2>Your sightings</h2>
+          <span class="count">${logs.length}</span>
+        </div>
+        ${logs.length > 1 ? `<p class="muted log-span">First seen ${fmtDate(first.seenAt)} · latest ${fmtDate(logs[0].seenAt)}</p>` : ''}
+        <div class="timeline">
+          ${logs.map((l, i) => `
+            <article class="log ${l.id === focus.id && focus.id !== logs[0].id ? 'focus' : ''}" id="log-${esc(l.id)}">
+              <span class="log-dot" aria-hidden="true"></span>
+              <div class="log-body">
+                <div class="log-head">
+                  <div>
+                    <span class="log-num">Sighting ${logs.length - i}</span>
+                    <b class="log-date">${fmtDate(l.seenAt) || 'No date'}</b>
+                  </div>
+                  <div class="log-actions">
+                    ${l.shiny ? '<span class="tag shiny">✦ Shiny</span>' : ''}
+                    <a class="mini-icon" href="#/edit/${encodeURIComponent(l.id)}" aria-label="Edit this sighting">${icons.edit}</a>
+                    <button type="button" class="mini-icon" data-del="${esc(l.id)}" aria-label="Delete this sighting">${icons.trash}</button>
+                  </div>
+                </div>
+                ${l.nickname ? `<p class="log-nick">“${esc(l.nickname)}”</p>` : ''}
+                ${l.photo
+                  ? `<figure class="photo-card"><img src="${l.photo}" alt="Your photo of ${esc(p.name)}" loading="lazy"></figure>`
+                  : `<a class="photo-empty small" href="#/edit/${encodeURIComponent(l.id)}">${icons.camera}<span>Add a photo</span></a>`}
+                ${l.description ? `<p class="log-desc">${esc(l.description)}</p>` : ''}
+                ${l.location ? `<a class="log-place" href="${hasCoords(l) ? '#/map/' + encodeURIComponent(l.id) : '#/edit/' + encodeURIComponent(l.id)}">${icons.pin}${esc(l.location)}</a>` : ''}
+              </div>
+            </article>`).join('')}
+        </div>
+        <a class="btn btn-white log-another" href="#/add/${encodeURIComponent(p.slug)}">${icons.camera} Log another ${esc(p.name)}</a>
+
         <section class="dex-entry" id="dexEntry">${dexEntryHTML(p)}</section>
-        ${(s.description || s.location) ? `
-          <div class="note-card">
-            ${s.description ? `<p>${esc(s.description)}</p>` : ''}
-            <div class="note-meta">
-              ${s.location ? `<span>${icons.pin}${esc(s.location)}</span>` : ''}
-              ${s.seenAt ? `<span>${icons.cal}${fmtDate(s.seenAt)}</span>` : ''}
-            </div>
-          </div>` : ''}
-        ${hasCoords(s) ? `
-          <a class="map-card detail" href="#/map/${encodeURIComponent(s.id)}" aria-label="See on the map">
+
+        ${pinned.length ? `
+          <a class="map-card detail" href="#/map/${encodeURIComponent((pinned.find((l) => l.id === focus.id) || pinned[0]).id)}" aria-label="See on the map">
             <div class="map-el" id="detailMap"></div>
             <div class="map-card-label glass">
-              <span>${icons.pin} ${esc(s.location || 'View on map')}</span>
+              <span>${icons.pin} ${pinned.length === 1 ? esc(pinned[0].location || 'View on map') : `Seen in ${pinned.length} places`}</span>
               <span class="go">${icons.play}</span>
             </div>
           </a>` : ''}
@@ -899,45 +940,54 @@
           p.isMythical ? 'Mythical Pokémon' : p.isLegendary ? 'Legendary Pokémon' : p.isBaby ? 'Baby Pokémon' : 'Regular Pokémon'
         }</b></div>
       </section>
-
-      <button class="btn btn-danger" id="delBtn">${icons.trash} Delete sighting</button>
     `);
 
-    if (hasCoords(s)) {
-      const dEl = $('#detailMap');
-      if (PokeMap.available()) {
-        const dm = PokeMap.create(dEl, { interactive: false, center: [s.lat, s.lng], zoom: 15 });
-        activeMaps.push(dm);
-        addPins(dm, [s], { interactive: false });
-      }
+    if (pinned.length && PokeMap.available()) {
+      const dm = PokeMap.create($('#detailMap'), { interactive: false, center: [pinned[0].lat, pinned[0].lng], zoom: 15 });
+      activeMaps.push(dm);
+      addPins(dm, pinned, { interactive: false });
+      fitPins(dm, pinned, 15);
+    }
+
+    // came here from a specific older sighting (map pin, Pokédex…) — bring it into view
+    if (logs.length > 1 && focus.id !== logs[0].id) {
+      setTimeout(() => {
+        const el = document.getElementById('log-' + focus.id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 350);
     }
 
     // Sightings logged before the personality update lack a few fields — top them up quietly.
     if (!('baseHappiness' in p) && navigator.onLine !== false) {
       Api.lookup(p.slug).then(async (info) => {
-        s.pokemon = info;
-        await DB.put(s);
+        for (const l of logs) { l.pokemon = info; await DB.put(l); }
         await refresh();
         const box = $('#dexEntry');
-        if (box && location.hash === '#/s/' + encodeURIComponent(s.id)) box.innerHTML = dexEntryHTML(info);
+        if (box) box.innerHTML = dexEntryHTML(info);
       }).catch(() => {});
     }
 
-    $('#delBtn').addEventListener('click', async () => {
+    view.querySelector('.timeline').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-del]');
+      if (!btn) return;
+      const target = logs.find((l) => l.id === btn.dataset.del);
+      if (!target) return;
       const ok = await confirmSheet({
-        title: `Delete ${p.name}?`,
-        body: 'This removes the sighting and your photo from this device.',
+        title: `Delete this ${p.name} sighting?`,
+        body: `The sighting from ${fmtDate(target.seenAt) || 'this date'} and its photo will be removed from this device.`,
       });
       if (!ok) return;
-      await DB.remove(s.id);
+      await DB.remove(target.id);
       await refresh();
       toast('Sighting deleted');
-      location.hash = '#/';
+      const rest = logs.filter((l) => l.id !== target.id);
+      if (rest.length) { history.replaceState(null, '', '#/s/' + encodeURIComponent(rest[0].id)); renderDetail(rest[0].id); }
+      else location.hash = '#/';
     });
   }
 
   /* ---------- add / edit ---------- */
-  async function renderForm(editId) {
+  async function renderForm(editId, presetSlug) {
     const existing = editId ? (sightings.find((x) => x.id === editId) || await DB.get(editId).catch(() => null)) : null;
     const state = {
       photo: existing ? existing.photo : null,
@@ -1294,6 +1344,12 @@
       locStatus.className = 'status';
       locStatus.innerHTML = '';
     });
+
+    if (!existing && presetSlug) {
+      const slug = decodeURIComponent(presetSlug);
+      pname.value = Api.pretty(slug);
+      identify(slug);
+    }
 
     /* save */
     $('#form').addEventListener('submit', async (e) => {
