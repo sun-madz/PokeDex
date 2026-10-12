@@ -30,6 +30,9 @@
     upload: ic('<path d="M12 20V9M7 14l5-5 5 5M5 4h14"/>'),
     check: ic('<path d="m5 12 5 5 9-10"/>'),
     x: ic('<path d="M6 6l12 12M18 6 6 18"/>'),
+    map: ic('<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>'),
+    target: ic('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
+    expand: ic('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
     up: ic('<path d="M12 19V5M6 11l6-6 6 6"/>'),
     dice: ic('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="15" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1" fill="currentColor"/>'),
     sparkle: ic('<path d="M12 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7z"/>'),
@@ -64,7 +67,15 @@
   };
   const typeChip = (t) =>
     `<span class="chip type" style="--c:${TYPE_COLORS[t] || '#999'}"><span class="type-dot"></span>${cap(t)}</span>`;
-  const trainerName = () => Trainer.load().name;
+  const NAME_KEY = 'pokelog:trainer';
+  const trainerName = () => {
+    try {
+      const prof = JSON.parse(localStorage.getItem('pokelog:trainer-profile') || '{}');
+      return localStorage.getItem(NAME_KEY) || prof.name || 'Trainer';
+    } catch (_) { return 'Trainer'; }
+  };
+  let activeMaps = [];
+  const hasCoords = (s) => typeof s.lat === 'number' && typeof s.lng === 'number';
   let viewCleanup = null; // screens that add page-level listeners register a teardown here
 
   async function refresh() {
@@ -157,11 +168,13 @@
 
   function router() {
     if (viewCleanup) { viewCleanup(); viewCleanup = null; }
+    activeMaps.forEach((m) => m.remove());
+    activeMaps = [];
     const parts = (location.hash.slice(1) || '/').split('/').filter(Boolean);
     window.scrollTo(0, 0);
     const [route, id] = parts;
-    setTab(['add', 'dex', 'trainer', 'settings'].includes(route) ? route : 'home');
-    if (route === 'trainer') return renderTrainer();
+    setTab(['add', 'dex', 'map', 'settings'].includes(route) ? route : 'home');
+    if (route === 'map') return renderMap(id);
     if (!route) return renderHome();
     if (route === 'add') return renderForm();
     if (route === 'dex') return renderDex();
@@ -204,7 +217,7 @@
           <h1 class="hello">Hi, ${esc(trainerName())}</h1>
           <div class="top-actions">
             <button class="icon-btn" id="searchBtn" aria-label="Search sightings">${icons.search}</button>
-            <a class="icon-btn avatar-btn" href="#/trainer" aria-label="Trainer profile"><span class="mini-trainer" style="background-image:url('${Trainer.url(Trainer.load().look)}')"></span></a>
+            <a class="icon-btn" href="#/map" aria-label="Sightings map">${icons.map}</a>
           </div>
         </header>
         <div class="rings">
@@ -220,6 +233,15 @@
         </label>
       </div>
 
+      <a class="map-card mini" href="#/map" aria-label="Open sightings map">
+        <div class="map-el" id="homeMap"></div>
+        <div class="map-card-label glass">
+          <span>${icons.map} Sightings map</span>
+          <small>${sightings.filter(hasCoords).length} pinned</small>
+          <span class="go">${icons.play}</span>
+        </div>
+      </a>
+
       <div class="section-head">
         <h2>Your Sightings</h2>
         <span class="count">${sightings.length}</span>
@@ -232,6 +254,7 @@
     });
 
     drawList(sightings);
+    drawMiniMap($('#homeMap'), sightings.filter(hasCoords));
 
     $('#searchBtn').addEventListener('click', () => {
       const w = $('#searchWrap');
@@ -519,148 +542,133 @@
     };
   }
 
-  /* ---------- trainer ---------- */
-  const LOOK_LABELS = {
-    skin: 'Skin tone', hairStyle: 'Hair style', hairColor: 'Hair colour', hat: 'Hat', hatColor: 'Hat colour',
-    topColor: 'Top', bottomStyle: 'Bottoms', bottomColor: 'Bottoms colour', shoeColor: 'Shoes', bag: 'Bag', bagColor: 'Bag colour',
-  };
-  const LOOK_ORDER = ['skin', 'hairStyle', 'hairColor', 'hat', 'hatColor', 'topColor', 'bottomStyle', 'bottomColor', 'shoeColor', 'bag', 'bagColor'];
-  const platformOf = (t) =>
-    ['water', 'ice'].includes(t) ? 'water'
-      : ['fire', 'ground', 'rock', 'fighting', 'steel'].includes(t) ? 'dirt'
-      : ['ghost', 'dark', 'poison', 'psychic', 'dragon', 'fairy'].includes(t) ? 'mystic'
-      : 'grass';
+  /* ---------- maps ---------- */
+  function addPins(map, list, { interactive = true } = {}) {
+    const byId = {};
+    const used = new Map();
+    list.forEach((s) => {
+      // nudge pins that share the exact same spot so they don't hide each other
+      const key = s.lat.toFixed(5) + ',' + s.lng.toFixed(5);
+      const n = used.get(key) || 0;
+      used.set(key, n + 1);
+      const angle = n * 2.4;
+      const ll = n ? [s.lat + Math.cos(angle) * 0.00012 * Math.sqrt(n), s.lng + Math.sin(angle) * 0.00012 * Math.sqrt(n)] : [s.lat, s.lng];
+      const m = L.marker(ll, { icon: PokeMap.pin(artOf(s), { shiny: s.shiny, size: interactive ? 46 : 34 }), interactive, keyboard: interactive });
+      if (interactive) {
+        m.bindPopup(`
+          <a class="map-pop" href="#/s/${encodeURIComponent(s.id)}">
+            <img src="${esc(artOf(s))}" alt="">
+            <div>
+              <b>${esc(s.pokemon.name)}</b>
+              ${s.nickname ? `<small>“${esc(s.nickname)}”</small>` : ''}
+              <small>${fmtDate(s.seenAt)}${s.location ? ' · ' + esc(s.location) : ''}</small>
+            </div>
+            <span class="arrow">${icons.play}</span>
+          </a>`, { maxWidth: 280, closeButton: false });
+      }
+      m.addTo(map);
+      byId[s.id] = m;
+    });
+    return byId;
+  }
 
-  function renderTrainer() {
-    const prof = Trainer.load();
+  function fitPins(map, list, maxZoom = 15) {
+    if (!list.length) return;
+    if (list.length === 1) { map.setView([list[0].lat, list[0].lng], maxZoom); return; }
+    map.fitBounds(L.latLngBounds(list.map((s) => [s.lat, s.lng])).pad(0.25), { maxZoom });
+  }
 
-    // one entry per species, newest sighting first
-    const species = [];
-    const ids = new Set();
-    for (const s of sightings) {
-      if (!ids.has(s.pokemon.id)) { ids.add(s.pokemon.id); species.push(s); }
-    }
-    const partnerOf = () => (prof.partnerId ? species.find((s) => s.pokemon.id === prof.partnerId) : null);
+  function drawMiniMap(el, list) {
+    if (!el) return;
+    if (!PokeMap.available()) { el.innerHTML = `<div class="map-empty">${icons.map}<span>Map needs an internet connection</span></div>`; return; }
+    const map = PokeMap.create(el, { interactive: false, zoom: 10 });
+    activeMaps.push(map);
+    addPins(map, list, { interactive: false });
+    fitPins(map, list, 14);
+  }
 
-    const typeCount = {};
-    sightings.forEach((s) => s.pokemon.types.forEach((t) => { typeCount[t] = (typeCount[t] || 0) + 1; }));
-    const favType = Object.keys(typeCount).sort((a, b) => typeCount[b] - typeCount[a])[0];
-    const rarest = sightings.slice().sort((a, b) =>
-      (b.pokemon.rarity.tier - a.pokemon.rarity.tier) || (a.pokemon.captureRate - b.pokemon.captureRate))[0];
-    const since = sightings.map((s) => s.seenAt).filter(Boolean).sort()[0];
+  async function renderMap(focusId) {
+    const pinned = sightings.filter(hasCoords);
+    const unplaced = sightings.filter((s) => !hasCoords(s));
+    const placeable = unplaced.filter((s) => s.location);
 
-    const stageHTML = () => {
-      const ps = partnerOf();
-      return `
-        <div class="stage-inner plat-${ps ? platformOf(ps.pokemon.types[0]) : 'grass'}">
-          <span class="stage-tag glass" id="stageName">${esc(prof.name)}</span>
-          ${ps ? `<span class="stage-tag right glass">Partner · ${esc(ps.pokemon.name)}</span>` : ''}
-          <div class="platform"></div>
-          <div class="actors">
-            <img class="trainer-img" src="${Trainer.url(prof.look)}" alt="Your trainer">
-            ${ps ? `<img class="partner-img" src="${Api.spriteUrl(ps.pokemon.id, ps.shiny)}" alt="${esc(ps.pokemon.name)}" onerror="this.onerror=null;${artOf(ps) ? `this.src='${esc(artOf(ps))}';this.classList.add('art')` : `this.style.visibility='hidden'`}">` : ''}
-          </div>
-        </div>`;
-    };
-
-    const customHTML = () => LOOK_ORDER.map((k) => {
-      const v = prof.look[k];
-      const body = Trainer.STYLES[k]
-        ? `<div class="opt-chips">${Trainer.STYLES[k].map(([val, label]) =>
-            `<button type="button" data-k="${k}" data-v="${val}" class="${v === val ? 'on' : ''}">${label}</button>`).join('')}</div>`
-        : `<div class="swatches">${Trainer.SWATCHES[k].map((c) =>
-            `<button type="button" data-k="${k}" data-v="${c}" class="sw ${String(v).toLowerCase() === c.toLowerCase() ? 'on' : ''}" style="--c:${c}" aria-label="${LOOK_LABELS[k]} ${c}"></button>`).join('')}</div>`;
-      return `<div class="opt" data-opt="${k}"><span class="opt-label">${LOOK_LABELS[k]}</span>${body}</div>`;
-    }).join('');
-
-    mount(`<div id="trainerRoot">
+    mount(`
       <header class="topbar">
-        <span class="icon-btn spacer" aria-hidden="true"></span>
-        <span class="topbar-title">Trainer</span>
-        <span class="icon-btn spacer" aria-hidden="true"></span>
+        <a class="icon-btn" href="#/" aria-label="Back">${icons.back}</a>
+        <span class="topbar-title">Sightings map</span>
+        <a class="icon-btn" href="#/add" aria-label="Log a sighting">${icons.camera}</a>
       </header>
 
-      <div class="stage" id="stage">${stageHTML()}</div>
-
-      <div class="field name-field">
-        <label for="tname">Trainer name</label>
-        <input id="tname" maxlength="20" value="${esc(prof.name)}">
+      <div class="map-card big">
+        <div class="map-el" id="bigMap"></div>
+        <span class="map-count glass">${pinned.length} pinned</span>
+        <div class="map-tools">
+          <button class="icon-btn glass" id="fitBtn" aria-label="Show all pins">${icons.expand}</button>
+          <button class="icon-btn glass" id="meBtn" aria-label="Show my location">${icons.target}</button>
+        </div>
       </div>
 
-      <section class="facts trainer-facts">
-        <div class="fact"><span>Sightings</span><b>${sightings.length}</b></div>
-        <div class="fact"><span>Species</span><b>${species.length}</b></div>
-        <div class="fact"><span>Shiny finds</span><b>${sightings.filter((s) => s.shiny).length}</b></div>
-        <div class="fact"><span>Trainer since</span><b>${since ? fmtDate(since) : '—'}</b></div>
-        <div class="fact"><span>Favourite type</span><b>${favType ? cap(favType) : '—'}</b></div>
-        <div class="fact"><span>Rarest find</span><b>${rarest ? esc(rarest.pokemon.name) : '—'}</b></div>
-      </section>
+      ${unplaced.length ? `
+        <section class="panel unplaced">
+          <h3>Not on the map yet</h3>
+          <p>${unplaced.length} sighting${unplaced.length === 1 ? ' has' : 's have'} no pin. Tap one to add its location${placeable.length ? ', or place the ones with a typed location automatically' : ''}.</p>
+          ${placeable.length ? `<button class="btn btn-white" id="placeBtn">${icons.pin} Place ${placeable.length} automatically</button>` : ''}
+          <div class="unplaced-list">
+            ${unplaced.map((s) => `
+              <a class="unplaced-item" href="#/edit/${encodeURIComponent(s.id)}">
+                <img src="${esc(artOf(s))}" alt="" loading="lazy">
+                <div><b>${esc(s.pokemon.name)}</b><small>${s.location ? esc(s.location) : 'No location'}</small></div>
+                <span class="tag">Add pin</span>
+              </a>`).join('')}
+          </div>
+        </section>` : ''}
+    `);
 
-      <section class="panel">
-        <h3>Partner Pokémon</h3>
-        ${species.length
-          ? `<p>Choose a Pokémon you've sighted to stand next to you.</p>
-             <div class="partner-grid">
-               <button type="button" class="partner-opt ${partnerOf() ? '' : 'on'}" data-pid="">${icons.x}<b>None</b></button>
-               ${species.map((s) => `
-                 <button type="button" class="partner-opt ${prof.partnerId === s.pokemon.id ? 'on' : ''}" data-pid="${s.pokemon.id}">
-                   <img src="${Api.spriteUrl(s.pokemon.id, s.shiny)}" alt="" loading="lazy" onerror="this.onerror=null;${artOf(s) ? `this.src='${esc(artOf(s))}'` : `this.style.visibility='hidden'`}">
-                   <b>${esc(s.pokemon.name)}</b>
-                 </button>`).join('')}
-             </div>`
-          : `<p>Log a sighting first, then pick it as your partner.</p><a class="btn btn-red" href="#/add">${icons.camera} Log a sighting</a>`}
-      </section>
+    const el = $('#bigMap');
+    if (!PokeMap.available()) {
+      el.innerHTML = `<div class="map-empty">${icons.map}<b>Map unavailable</b><span>Check your internet connection and reload.</span></div>`;
+      return;
+    }
+    const map = PokeMap.create(el, { interactive: true, zoom: 11 });
+    activeMaps.push(map);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    const markers = addPins(map, pinned);
+    fitPins(map, pinned);
+    if (!pinned.length) {
+      el.insertAdjacentHTML('beforeend', `<div class="map-hint glass">No pins yet — add a location when you log a sighting.</div>`);
+    }
+    if (focusId && markers[focusId]) {
+      map.setView(markers[focusId].getLatLng(), 16);
+      setTimeout(() => markers[focusId].openPopup(), 250);
+    }
 
-      <section class="panel custom">
-        <div class="custom-head">
-          <h3>Customise your look</h3>
-          <button type="button" class="mini-btn" id="randBtn">${icons.dice} Randomise</button>
-        </div>
-        <div id="customOpts">${customHTML()}</div>
-      </section>
-    </div>`);
-
-    const redrawStage = () => { $('#stage').innerHTML = stageHTML(); };
-    const syncDeps = () => {
-      const hatC = view.querySelector('[data-opt="hatColor"]');
-      const bagC = view.querySelector('[data-opt="bagColor"]');
-      if (hatC) hatC.hidden = prof.look.hat === 'none';
-      if (bagC) bagC.hidden = prof.look.bag === 'none';
-    };
-    syncDeps();
-
-    $('#tname').addEventListener('input', (e) => {
-      prof.name = e.target.value.trim() || 'Trainer';
-      Trainer.save(prof);
-      const tag = $('#stageName');
-      if (tag) tag.textContent = prof.name;
+    $('#fitBtn').addEventListener('click', () => (pinned.length ? fitPins(map, pinned) : map.setView(PokeMap.DEFAULT_CENTER, 11)));
+    let meDot = null;
+    $('#meBtn').addEventListener('click', () => {
+      if (!navigator.geolocation) return toast('Location isn’t available on this device');
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const ll = [pos.coords.latitude, pos.coords.longitude];
+        if (meDot) meDot.setLatLng(ll);
+        else meDot = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#2E86DE', fillOpacity: 1 }).addTo(map);
+        map.flyTo(ll, 15);
+      }, () => toast('Couldn’t get your location — allow location access'), { enableHighAccuracy: true, timeout: 10000 });
     });
 
-    $('#trainerRoot').addEventListener('click', (e) => {
-      const opt = e.target.closest('[data-k]');
-      if (opt) {
-        prof.look[opt.dataset.k] = opt.dataset.v;
-        Trainer.save(prof);
-        view.querySelectorAll(`[data-k="${opt.dataset.k}"]`).forEach((b) => b.classList.toggle('on', b === opt));
-        syncDeps();
-        redrawStage();
-        return;
+    const placeBtn = $('#placeBtn');
+    if (placeBtn) placeBtn.addEventListener('click', async () => {
+      placeBtn.disabled = true;
+      let placed = 0;
+      for (const s of placeable) {
+        placeBtn.textContent = `Placing ${s.pokemon.name}…`;
+        try {
+          const [hit] = await Geo.search(s.location);
+          if (hit) { s.lat = hit.lat; s.lng = hit.lng; await DB.put(s); placed++; }
+        } catch (_) { /* skip */ }
+        await new Promise((r) => setTimeout(r, 700)); // be gentle with the free place-search service
       }
-      const p = e.target.closest('[data-pid]');
-      if (p) {
-        prof.partnerId = p.dataset.pid ? Number(p.dataset.pid) : null;
-        Trainer.save(prof);
-        view.querySelectorAll('[data-pid]').forEach((b) => b.classList.toggle('on', b === p));
-        redrawStage();
-      }
-    });
-
-    $('#randBtn').addEventListener('click', () => {
-      prof.look = Trainer.randomLook();
-      Trainer.save(prof);
-      $('#customOpts').innerHTML = customHTML();
-      syncDeps();
-      redrawStage();
+      await refresh();
+      toast(placed ? `Placed ${placed} on the map` : 'Couldn’t find those places — add pins by hand');
+      if (location.hash.startsWith('#/map')) renderMap();
     });
   }
 
@@ -713,6 +721,14 @@
               ${s.seenAt ? `<span>${icons.cal}${fmtDate(s.seenAt)}</span>` : ''}
             </div>
           </div>` : ''}
+        ${hasCoords(s) ? `
+          <a class="map-card detail" href="#/map/${encodeURIComponent(s.id)}" aria-label="See on the map">
+            <div class="map-el" id="detailMap"></div>
+            <div class="map-card-label glass">
+              <span>${icons.pin} ${esc(s.location || 'View on map')}</span>
+              <span class="go">${icons.play}</span>
+            </div>
+          </a>` : ''}
       </section>
 
       <div class="split-pill glass">
@@ -750,6 +766,15 @@
       <button class="btn btn-danger" id="delBtn">${icons.trash} Delete sighting</button>
     `);
 
+    if (hasCoords(s)) {
+      const dEl = $('#detailMap');
+      if (PokeMap.available()) {
+        const dm = PokeMap.create(dEl, { interactive: false, center: [s.lat, s.lng], zoom: 15 });
+        activeMaps.push(dm);
+        addPins(dm, [s], { interactive: false });
+      }
+    }
+
     // Sightings logged before the personality update lack a few fields — top them up quietly.
     if (!('baseHappiness' in p) && navigator.onLine !== false) {
       Api.lookup(p.slug).then(async (info) => {
@@ -777,7 +802,15 @@
   /* ---------- add / edit ---------- */
   async function renderForm(editId) {
     const existing = editId ? (sightings.find((x) => x.id === editId) || await DB.get(editId).catch(() => null)) : null;
-    const state = { photo: existing ? existing.photo : null, pokemon: existing ? existing.pokemon : null };
+    const state = {
+      photo: existing ? existing.photo : null,
+      pokemon: existing ? existing.pokemon : null,
+      lat: existing && hasCoords(existing) ? existing.lat : null,
+      lng: existing && hasCoords(existing) ? existing.lng : null,
+    };
+    let locMap = null;
+    let locMarker = null;
+    const pinIcon = () => PokeMap.pin(state.pokemon ? ((shinyEl.checked && state.pokemon.artworkShiny) || state.pokemon.artwork) : null, { shiny: shinyEl.checked });
 
     mount(`
       <header class="topbar">
@@ -828,15 +861,25 @@
           <textarea id="desc" rows="4" placeholder="Where was it? What was it doing?">${esc(existing ? existing.description : '')}</textarea>
         </div>
 
-        <div class="field-row">
-          <div class="field">
-            <label for="date">Date seen</label>
-            <input type="date" id="date" value="${esc(existing ? existing.seenAt : todayISO())}">
+        <div class="field">
+          <label for="date">Date seen</label>
+          <input type="date" id="date" value="${esc(existing ? existing.seenAt : todayISO())}">
+        </div>
+
+        <div class="field">
+          <label for="loc">Location <em>shows on your map</em></label>
+          <div class="name-wrap">
+            <input id="loc" maxlength="80" placeholder="Search a place, or tap the map" value="${esc(existing ? existing.location : '')}"
+              role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="locSuggest" spellcheck="false">
+            <span class="status" id="locStatus" aria-hidden="true"></span>
+            <ul class="suggest glass" id="locSuggest" role="listbox" hidden></ul>
           </div>
-          <div class="field">
-            <label for="loc">Location <em>optional</em></label>
-            <input id="loc" maxlength="60" placeholder="e.g. KLCC Park" value="${esc(existing ? existing.location : '')}">
+          <div class="loc-map"><div class="map-el" id="locMap"></div></div>
+          <div class="loc-actions">
+            <button type="button" class="chip-btn" id="gpsBtn">${icons.target} Use my location</button>
+            <button type="button" class="chip-btn" id="clearPin" hidden>${icons.x} Remove pin</button>
           </div>
+          <p class="hint" id="locHint">Tap the map to drop a pin, then drag it to fine-tune.</p>
         </div>
 
         <button class="btn btn-red" type="submit" id="saveBtn">${icons.check} ${existing ? 'Save changes' : 'Log sighting'}</button>
@@ -874,6 +917,7 @@
     const renderPreview = () => {
       const box = $('#preview');
       const p = state.pokemon;
+      if (locMarker) locMarker.setIcon(pinIcon());
       if (!p) { box.innerHTML = ''; return; }
       const art = (shinyEl.checked && p.artworkShiny) || p.artwork;
       box.innerHTML = `
@@ -992,6 +1036,128 @@
       if (li) pick(Number(li.dataset.i));
     });
 
+    /* location: search box + tap-to-pin map */
+    const locInput = $('#loc');
+    const locSuggest = $('#locSuggest');
+    const locStatus = $('#locStatus');
+    const locHint = $('#locHint');
+    const clearPin = $('#clearPin');
+    let autoLabel = false; // true when the text was filled in for you, so moving the pin may update it
+    let locMatches = [];
+    let locActive = -1;
+
+    const setPin = (lat, lng, { fly = true } = {}) => {
+      state.lat = lat;
+      state.lng = lng;
+      clearPin.hidden = false;
+      locStatus.className = 'status ok';
+      locStatus.innerHTML = icons.pin;
+      if (!locMap) return;
+      if (!locMarker) {
+        locMarker = L.marker([lat, lng], { icon: pinIcon(), draggable: true }).addTo(locMap);
+        locMarker.on('dragend', () => {
+          const ll = locMarker.getLatLng();
+          setPin(ll.lat, ll.lng, { fly: false });
+          fillLabel(ll.lat, ll.lng);
+        });
+      } else {
+        locMarker.setLatLng([lat, lng]);
+      }
+      if (fly) locMap.flyTo([lat, lng], Math.max(locMap.getZoom(), 16), { duration: 0.6 });
+    };
+    const fillLabel = async (lat, lng) => {
+      if (locInput.value.trim() && !autoLabel) return;
+      try {
+        const name = await Geo.reverse(lat, lng);
+        if (name && (!locInput.value.trim() || autoLabel)) { locInput.value = name; autoLabel = true; }
+      } catch (_) { /* offline: keep the pin without a name */ }
+    };
+
+    if (PokeMap.available()) {
+      const last = sightings.find(hasCoords);
+      const center = state.lat !== null ? [state.lat, state.lng] : last ? [last.lat, last.lng] : PokeMap.DEFAULT_CENTER;
+      locMap = PokeMap.create($('#locMap'), { interactive: true, center, zoom: state.lat !== null ? 16 : last ? 13 : 11 });
+      activeMaps.push(locMap);
+      if (state.lat !== null) setPin(state.lat, state.lng, { fly: false });
+      locMap.on('click', (e) => {
+        setPin(e.latlng.lat, e.latlng.lng, { fly: false });
+        fillLabel(e.latlng.lat, e.latlng.lng);
+      });
+    } else {
+      $('#locMap').innerHTML = `<div class="map-empty">${icons.map}<span>Map needs an internet connection — you can still type a place.</span></div>`;
+    }
+
+    const closeLoc = () => { locSuggest.hidden = true; locInput.setAttribute('aria-expanded', 'false'); locActive = -1; };
+    const pickLoc = (i) => {
+      const m = locMatches[i];
+      if (!m) return;
+      locInput.value = m.label;
+      autoLabel = true;
+      closeLoc();
+      setPin(m.lat, m.lng);
+    };
+    let locTimer;
+    let locToken = 0;
+    locInput.addEventListener('input', () => {
+      autoLabel = false;
+      clearTimeout(locTimer);
+      const q = locInput.value.trim();
+      if (q.length < 3) return closeLoc();
+      locTimer = setTimeout(async () => {
+        const my = ++locToken;
+        const c = locMap ? locMap.getCenter() : null;
+        try {
+          const res = await Geo.search(q, c);
+          if (my !== locToken) return;
+          locMatches = res;
+          if (!res.length) return closeLoc();
+          locSuggest.innerHTML = res.map((m, i) => `
+            <li role="option" id="loc-${i}" data-i="${i}">
+              <span class="loc-ico">${icons.pin}</span>
+              <span class="loc-text"><b>${esc(m.label)}</b>${m.sub ? `<small>${esc(m.sub)}</small>` : ''}</span>
+            </li>`).join('');
+          locSuggest.hidden = false;
+          locInput.setAttribute('aria-expanded', 'true');
+        } catch (_) { closeLoc(); }
+      }, 400);
+    });
+    locInput.addEventListener('keydown', (e) => {
+      if (locSuggest.hidden) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); locActive = Math.min(locMatches.length - 1, locActive + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); locActive = Math.max(0, locActive - 1); }
+      else if (e.key === 'Enter') { e.preventDefault(); return pickLoc(locActive >= 0 ? locActive : 0); }
+      else if (e.key === 'Escape') return closeLoc();
+      else return;
+      [...locSuggest.children].forEach((li, i) => li.classList.toggle('active', i === locActive));
+    });
+    locInput.addEventListener('blur', () => setTimeout(closeLoc, 160));
+    locSuggest.addEventListener('mousedown', (e) => e.preventDefault());
+    locSuggest.addEventListener('click', (e) => {
+      const li = e.target.closest('li');
+      if (li) pickLoc(Number(li.dataset.i));
+    });
+
+    $('#gpsBtn').addEventListener('click', () => {
+      if (!navigator.geolocation) return toast('Location isn’t available on this device');
+      locHint.textContent = 'Finding you…';
+      navigator.geolocation.getCurrentPosition((pos) => {
+        setPin(pos.coords.latitude, pos.coords.longitude);
+        if (!locInput.value.trim()) autoLabel = true;
+        fillLabel(pos.coords.latitude, pos.coords.longitude);
+        locHint.textContent = 'Pinned to where you are — drag the pin if it’s a little off.';
+      }, () => {
+        locHint.textContent = 'Couldn’t get your location — allow location access, or tap the map.';
+      }, { enableHighAccuracy: true, timeout: 10000 });
+    });
+    clearPin.addEventListener('click', () => {
+      state.lat = null;
+      state.lng = null;
+      if (locMarker) { locMarker.remove(); locMarker = null; }
+      clearPin.hidden = true;
+      locStatus.className = 'status';
+      locStatus.innerHTML = '';
+    });
+
     /* save */
     $('#form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1019,6 +1185,8 @@
         description: $('#desc').value.trim(),
         seenAt: $('#date').value || todayISO(),
         location: $('#loc').value.trim(),
+        lat: state.lat,
+        lng: state.lng,
         shiny,
         artUrl,
         artData,
@@ -1050,6 +1218,13 @@
 
       <div class="settings">
         <div class="panel">
+          <div class="field">
+            <label for="trainer">Trainer name</label>
+            <input id="trainer" maxlength="24" value="${esc(trainerName())}">
+          </div>
+        </div>
+
+        <div class="panel">
           <h3>Your data</h3>
           <p>${sightings.length} sighting${sightings.length === 1 ? '' : 's'} saved in this browser. They stay when you close the app, but only on this device. Export a backup to move them or keep them safe.</p>
           <div class="btn-row">
@@ -1068,6 +1243,10 @@
         <p class="credit">Pokémon data &amp; artwork from <a href="https://pokeapi.co" target="_blank" rel="noopener">PokéAPI</a>. Pokémon is © Nintendo / Game Freak / The Pokémon Company. Fan project, not affiliated.</p>
       </div>
     `);
+
+    $('#trainer').addEventListener('input', (e) => {
+      try { localStorage.setItem(NAME_KEY, e.target.value.trim() || 'Trainer'); } catch (_) { /* ignore */ }
+    });
 
     $('#exportBtn').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify({ app: 'pokedex', version: 1, exportedAt: new Date().toISOString(), sightings }, null, 0)], { type: 'application/json' });
