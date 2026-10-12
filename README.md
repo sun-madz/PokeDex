@@ -29,7 +29,7 @@ A personal Pokémon sighting log. Upload a photo, type the Pokémon's name, and 
 | `app.js` | Screens: home, log/edit, sighting detail, settings |
 | `api.js` | PokéAPI lookups and rarity logic |
 | `db.js` | Saves sightings in the browser (IndexedDB) |
-| `map.js` | Map setup (Leaflet + OpenStreetMap tiles) and place search (Photon) — no API keys needed |
+| `map.js` | Map setup (Google Maps via Leaflet, with an OpenStreetMap fallback) and place search (Photon). The Google Maps key is at the top of this file |
 | `manifest.webmanifest`, `favicon.svg` | App icon / "Add to Home Screen" |
 
 ## Preview it
@@ -64,3 +64,11 @@ then open http://localhost:8000. (Or use the "Live Server" extension in VS Code.
 - Sightings live in the browser you used, at that web address. A different browser, device or URL starts with an empty log — use **Settings → Export / Import** to move them.
 - iPhone HEIC photos work in Safari. If an image won't load in another browser, use a JPG or PNG.
 - Pokémon and Pokémon character names are trademarks of Nintendo, Game Freak and The Pokémon Company. This is a fan project and is not affiliated with them. Data and artwork come from PokéAPI.
+
+## Google Maps key
+
+The key lives at the top of `map.js` (`GOOGLE_MAPS_KEY`). Browser keys are always visible to anyone who opens the site, so lock it down in [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
+
+1. Open the key → **Application restrictions** → **Websites**, and add your site, e.g. `https://your-app.vercel.app/*` (add `http://localhost:8000/*` too if you preview locally).
+2. **API restrictions** → **Restrict key** → tick only **Maps JavaScript API**.
+3. Save. If the key is ever rejected, the map quietly switches to OpenStreetMap instead of breaking.
