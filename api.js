@@ -1,4 +1,4 @@
-/* PokéLog — PokéAPI client (https://pokeapi.co). No API key needed. */
+/* PokéDex — PokéAPI client (https://pokeapi.co). No API key needed. */
 const Api = (() => {
   const BASE = 'https://pokeapi.co/api/v2';
   const LIST_KEY = 'pokelog:species-list:v1';
@@ -129,6 +129,8 @@ const Api = (() => {
       artworkShiny: art.front_shiny || pokemon.sprites.front_shiny || null,
       sprite: pokemon.sprites.front_default,
       captureRate: species.capture_rate,
+      baseHappiness: species.base_happiness ?? null,
+      growthRate: species.growth_rate ? species.growth_rate.name : null,
       isLegendary: species.is_legendary,
       isMythical: species.is_mythical,
       isBaby: species.is_baby,
@@ -147,5 +149,13 @@ const Api = (() => {
   const spriteUrl = (id) =>
     `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
 
-  return { slugify, pretty, speciesList, lookup, spriteUrl };
+  /* National Dex ranges for each generation */
+  const GEN_RANGES = [[1, 151], [152, 251], [252, 386], [387, 493], [494, 649], [650, 721], [722, 809], [810, 905], [906, 1025]];
+  const genOfId = (id) => {
+    const i = GEN_RANGES.findIndex(([a, b]) => id >= a && id <= b);
+    return i === -1 ? 9 : i + 1;
+  };
+  const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
+
+  return { slugify, pretty, speciesList, lookup, spriteUrl, genOfId, ROMAN };
 })();

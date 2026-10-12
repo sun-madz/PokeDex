@@ -10,6 +10,8 @@ A personal Pokémon sighting log. Upload a photo, type the Pokémon's name, and 
 - Base stats chart, height/weight, generation & region, rarity tier, capture rate, abilities, habitat, Pokédex entry
 - Optional nickname, description, date and location
 - Edit or delete sightings; search your log
+- Pokédex tab: every Pokémon by National Dex number — sighted ones in full colour, unsighted ones as black silhouettes; filter by sighted/missing and generation
+- Pokédex entry card under your photo with a personality description (built from type, stats, friendliness, rarity and habitat) plus the official field notes
 - Progress rings: Pokédex %, types seen, generations seen
 - Data saved on-device (IndexedDB) and works offline once logged
 - Export / import a JSON backup

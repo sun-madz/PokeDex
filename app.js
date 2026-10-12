@@ -1,4 +1,4 @@
-/* PokéLog — UI and app logic. */
+/* PokéDex — UI and app logic. */
 (() => {
   'use strict';
 
@@ -159,9 +159,10 @@
     const parts = (location.hash.slice(1) || '/').split('/').filter(Boolean);
     window.scrollTo(0, 0);
     const [route, id] = parts;
-    setTab(route === 'add' || route === 'settings' ? route : 'home');
+    setTab(route === 'add' || route === 'dex' || route === 'settings' ? route : 'home');
     if (!route) return renderHome();
     if (route === 'add') return renderForm();
+    if (route === 'dex') return renderDex();
     if (route === 'edit') return renderForm(id);
     if (route === 's') return renderDetail(id);
     if (route === 'settings') return renderSettings();
@@ -169,12 +170,13 @@
   }
 
   /* ---------- home ---------- */
-  function ring(pct, value, label, tone, icon) {
+  function ring(pct, value, label, tone, icon, href) {
     const r = 38;
     const c = 2 * Math.PI * r;
     const p = Math.max(0, Math.min(1, pct));
+    const tag = href ? 'a' : 'div';
     return `
-      <div class="ring ring-${tone}">
+      <${tag} class="ring ring-${tone}"${href ? ` href="${href}" aria-label="Open Pokédex"` : ''}>
         <div class="ring-dial">
           <svg class="ring-svg" viewBox="0 0 92 92" aria-hidden="true">
             <circle class="track" cx="46" cy="46" r="${r}"/>
@@ -184,7 +186,7 @@
           <div class="ring-center">${icon}<b>${value}</b></div>
         </div>
         <span>${label}</span>
-      </div>`;
+      </${tag}>`;
   }
 
   function renderHome() {
@@ -200,11 +202,11 @@
           <h1 class="hello">Hi, ${esc(trainerName())} <span class="wave">👋</span></h1>
           <div class="top-actions">
             <button class="icon-btn" id="searchBtn" aria-label="Search sightings">${icons.search}</button>
-            <a class="icon-btn" href="#/add" aria-label="Log a sighting">${icons.camera}<span class="dot"></span></a>
+            <a class="icon-btn" href="#/settings" aria-label="Settings">${icons.sliders}</a>
           </div>
         </header>
         <div class="rings">
-          ${ring(dexPct, dexLabel, 'Pokédex', 'white', icons.book)}
+          ${ring(dexPct, dexLabel, 'Pokédex', 'white', icons.book, '#/dex')}
           ${ring(types / 18, `${types}/18`, 'Types', 'red', icons.bolt)}
           ${ring(gens / 9, `${gens}/9`, 'Generations', 'soft', icons.layers)}
         </div>
@@ -284,6 +286,173 @@
     }).join('');
   }
 
+  /* ---------- personality (built from the Pokémon's real data) ---------- */
+  const TYPE_TRAITS = {
+    normal: ['Easygoing', 'easygoing and adaptable'],
+    fire: ['Fiery', 'fiery and passionate'],
+    water: ['Serene', 'serene and happy to go with the flow'],
+    grass: ['Gentle', 'gentle and patient'],
+    electric: ['Energetic', 'energetic and a little restless'],
+    ice: ['Reserved', 'cool-headed and reserved'],
+    fighting: ['Disciplined', 'disciplined and determined'],
+    poison: ['Wary', 'wary and quick to defend itself'],
+    ground: ['Steady', 'steady and stubborn'],
+    flying: ['Free-spirited', 'free-spirited and adventurous'],
+    psychic: ['Perceptive', 'perceptive and introspective'],
+    bug: ['Curious', 'curious and hard-working'],
+    rock: ['Tough', 'tough and unshakeable'],
+    ghost: ['Mischievous', 'mischievous and mysterious'],
+    dragon: ['Proud', 'proud and strong-willed'],
+    dark: ['Cunning', 'cunning and independent'],
+    steel: ['Stoic', 'stoic and resilient'],
+    fairy: ['Playful', 'playful and affectionate'],
+  };
+  const STAT_TRAITS = {
+    hp: ['Resilient', 'has incredible stamina and rarely gives up'],
+    attack: ['Bold', 'meets every challenge head-on'],
+    defense: ['Cautious', 'would rather hold its ground than strike first'],
+    'special-attack': ['Clever', 'relies on its wits and special powers'],
+    'special-defense': ['Composed', 'stays calm even under pressure'],
+    speed: ['Swift', 'is always on the move and hates sitting still'],
+  };
+  const HABITAT_PLACES = {
+    cave: 'caves', forest: 'forests', grassland: 'grasslands', mountain: 'the mountains',
+    'rough terrain': 'rough terrain', sea: 'the open sea', urban: 'towns and cities', 'waters edge': 'places near water',
+  };
+
+  function personality(p) {
+    const traits = [];
+    const sentences = [];
+    const [t1, t2] = p.types;
+    const a = TYPE_TRAITS[t1] || TYPE_TRAITS.normal;
+    const b = t2 && TYPE_TRAITS[t2];
+    traits.push(a[0]);
+    sentences.push(`${p.name} is ${a[1]}${b ? `, with a ${b[0].toLowerCase()} streak` : ''}.`);
+
+    const top = p.stats.slice().sort((x, y) => y.value - x.value)[0];
+    const st = top && STAT_TRAITS[top.key];
+    if (st) { traits.push(st[0]); sentences.push(`In battle it ${st[1]}.`); }
+
+    const hb = p.baseHappiness;
+    if (typeof hb === 'number') {
+      const h = hb >= 100 ? ['Affectionate', 'It warms up to people almost instantly.']
+        : hb >= 50 ? ['Loyal', 'Once it trusts you, it makes a loyal companion.']
+        : hb > 0 ? ['Aloof', 'It tends to keep a polite distance from people.']
+        : ['Independent', 'It is fiercely independent and hard to befriend.'];
+      traits.push(h[0]);
+      sentences.push(h[1]);
+    }
+
+    if (p.isMythical || p.isLegendary) sentences.push('Few have ever seen it, and it carries an air of ancient majesty.');
+    else if (p.isBaby) sentences.push('Still young, it is innocent and endlessly curious about the world.');
+    else if (p.captureRate <= 45) sentences.push('It is elusive and shy around trainers.');
+    else if (p.captureRate >= 190) sentences.push('It is a common, approachable sight near people.');
+
+    const place = HABITAT_PLACES[(p.habitat || '').toLowerCase()];
+    if (place) sentences.push(`It feels most at home in ${place}.`);
+
+    return { traits: [...new Set(traits)], text: sentences.join(' ') };
+  }
+
+  function dexEntryHTML(p) {
+    const per = personality(p);
+    return `
+      <div class="dex-entry-head"><span>Pokédex entry</span><small>${dexNo(p.id)}</small></div>
+      <h3>Personality</h3>
+      <div class="traits">${per.traits.map((t) => `<span>${esc(t)}</span>`).join('')}</div>
+      <p class="persona">${esc(per.text)}</p>
+      ${p.flavor ? `<div class="flavor"><h3>Field notes</h3><p>${esc(p.flavor)}</p></div>` : ''}`;
+  }
+
+  /* ---------- pokédex ---------- */
+  const dexFilter = { status: 'all', gen: 0 };
+
+  async function renderDex() {
+    const seenMap = new Map(); // id -> { s: latest sighting, count }
+    for (const s of sightings) {
+      const e = seenMap.get(s.pokemon.id);
+      if (e) e.count++; else seenMap.set(s.pokemon.id, { s, count: 1 });
+    }
+    let list = await Api.speciesList().catch(() => null);
+    if (!list || !list.length) list = Array.from({ length: DEX_TOTAL }, (_, i) => ({ id: i + 1, slug: '' }));
+    list = list.slice().sort((a, b) => a.id - b.id);
+    const total = list.length;
+    const seen = seenMap.size;
+    const pct = total ? (seen / total) * 100 : 0;
+
+    mount(`
+      <header class="topbar">
+        <span class="icon-btn spacer" aria-hidden="true"></span>
+        <span class="topbar-title">Pokédex</span>
+        <a class="icon-btn" href="#/add" aria-label="Log a sighting">${icons.camera}</a>
+      </header>
+      <h1 class="big-name">My<br>Pokédex</h1>
+
+      <div class="dex-progress">
+        <div class="dex-progress-top"><b>${seen}<small> / ${total}</small></b><span class="muted">${pct < 10 ? pct.toFixed(1) : Math.round(pct)}% sighted</span></div>
+        <div class="meter"><i style="--p:${pct.toFixed(2)}%"></i></div>
+      </div>
+
+      <div class="seg" role="tablist" aria-label="Show">
+        ${[['all', 'All'], ['seen', 'Sighted'], ['missing', 'Missing']].map(([k, l]) =>
+          `<button role="tab" data-status="${k}" class="${dexFilter.status === k ? 'on' : ''}" aria-selected="${dexFilter.status === k}">${l}</button>`).join('')}
+      </div>
+      <div class="gen-chips" aria-label="Generation">
+        ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) =>
+          `<button data-gen="${g}" class="${dexFilter.gen === g ? 'on' : ''}">${g ? 'Gen ' + Api.ROMAN[g] : 'All gens'}</button>`).join('')}
+      </div>
+
+      <div class="dex-grid" id="dexGrid"></div>
+    `);
+
+    const draw = () => {
+      const items = list.filter((m) => {
+        if (dexFilter.gen && Api.genOfId(m.id) !== dexFilter.gen) return false;
+        if (dexFilter.status === 'seen') return seenMap.has(m.id);
+        if (dexFilter.status === 'missing') return !seenMap.has(m.id);
+        return true;
+      });
+      const grid = $('#dexGrid');
+      if (!items.length) {
+        grid.innerHTML = `<div class="empty dex-empty"><h3>${dexFilter.status === 'seen' ? 'None sighted here yet' : 'All caught here!'}</h3><p>${dexFilter.status === 'seen' ? 'Log a sighting and it will light up.' : 'Every Pokémon in this view has been sighted.'}</p></div>`;
+        return;
+      }
+      grid.innerHTML = items.map((m) => {
+        const e = seenMap.get(m.id);
+        if (e) {
+          return `
+            <a class="dex-cell seen" href="#/s/${encodeURIComponent(e.s.id)}" aria-label="${esc(e.s.pokemon.name)}, ${dexNo(m.id)}">
+              <span class="dex-num">${dexNo(m.id)}</span>
+              ${e.count > 1 ? `<span class="dex-count">×${e.count}</span>` : ''}
+              <img src="${esc(artOf(e.s))}" alt="" loading="lazy" onerror="this.src='${Api.spriteUrl(m.id)}'">
+              <b>${esc(e.s.pokemon.name)}</b>
+            </a>`;
+        }
+        return `
+          <div class="dex-cell unseen" aria-label="${dexNo(m.id)}, not sighted yet">
+            <span class="dex-num">${dexNo(m.id)}</span>
+            <img src="${Api.spriteUrl(m.id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+            <b>???</b>
+          </div>`;
+      }).join('');
+    };
+    draw();
+
+    view.querySelectorAll('[data-status]').forEach((b) => b.addEventListener('click', () => {
+      dexFilter.status = b.dataset.status;
+      view.querySelectorAll('[data-status]').forEach((x) => {
+        x.classList.toggle('on', x === b);
+        x.setAttribute('aria-selected', x === b);
+      });
+      draw();
+    }));
+    view.querySelectorAll('[data-gen]').forEach((b) => b.addEventListener('click', () => {
+      dexFilter.gen = Number(b.dataset.gen);
+      view.querySelectorAll('[data-gen]').forEach((x) => x.classList.toggle('on', x === b));
+      draw();
+    }));
+  }
+
   /* ---------- detail ---------- */
   async function renderDetail(id) {
     const s = sightings.find((x) => x.id === id) || await DB.get(id).catch(() => null);
@@ -324,6 +493,7 @@
         ${s.photo
           ? `<figure class="photo-card"><img src="${s.photo}" alt="Your photo of ${esc(p.name)}"></figure>`
           : `<a class="photo-empty" href="#/edit/${encodeURIComponent(s.id)}">${icons.camera}<span>Add your photo</span></a>`}
+        <section class="dex-entry" id="dexEntry">${dexEntryHTML(p)}</section>
         ${(s.description || s.location) ? `
           <div class="note-card">
             ${s.description ? `<p>${esc(s.description)}</p>` : ''}
@@ -366,10 +536,19 @@
         }</b></div>
       </section>
 
-      ${p.flavor ? `<blockquote class="dex-entry"><span>Pokédex entry</span>${esc(p.flavor)}</blockquote>` : ''}
-
       <button class="btn btn-danger" id="delBtn">${icons.trash} Delete sighting</button>
     `);
+
+    // Sightings logged before the personality update lack a few fields — top them up quietly.
+    if (!('baseHappiness' in p) && navigator.onLine !== false) {
+      Api.lookup(p.slug).then(async (info) => {
+        s.pokemon = info;
+        await DB.put(s);
+        await refresh();
+        const box = $('#dexEntry');
+        if (box && location.hash === '#/s/' + encodeURIComponent(s.id)) box.innerHTML = dexEntryHTML(info);
+      }).catch(() => {});
+    }
 
     $('#delBtn').addEventListener('click', async () => {
       const ok = await confirmSheet({
@@ -691,10 +870,10 @@
     });
 
     $('#exportBtn').addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify({ app: 'pokelog', version: 1, exportedAt: new Date().toISOString(), sightings }, null, 0)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify({ app: 'pokedex', version: 1, exportedAt: new Date().toISOString(), sightings }, null, 0)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `pokelog-backup-${todayISO()}.json`;
+      a.download = `pokedex-backup-${todayISO()}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -717,7 +896,7 @@
         toast(`Imported ${n} sighting${n === 1 ? '' : 's'}`);
         renderSettings();
       } catch (_) {
-        toast('That file isn’t a PokéLog backup');
+        toast('That file isn’t a PokéDex backup');
       }
     });
 

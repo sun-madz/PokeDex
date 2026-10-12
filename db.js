@@ -1,8 +1,8 @@
-/* PokéLog — local storage layer (IndexedDB).
+/* PokéDex — local storage layer (IndexedDB).
    Photos are large, so we use IndexedDB instead of localStorage (which caps at ~5 MB).
    Everything stays on the device in this browser. */
 const DB = (() => {
-  const NAME = 'pokelog';
+  const NAME = 'pokelog'; // kept as-is so existing saved sightings carry over
   const VERSION = 1;
   const STORE = 'sightings';
   let dbPromise = null;

@@ -1,6 +1,6 @@
 {
-  "name": "PokéLog",
-  "short_name": "PokéLog",
+  "name": "PokéDex",
+  "short_name": "PokéDex",
   "description": "Log the Pokémon you spot, with your photos and Pokédex data.",
   "start_url": "./",
   "scope": "./",

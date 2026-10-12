@@ -1,4 +1,4 @@
-/* PokéLog — Poké Ball palette: black, red, white. Overlays use liquid glass. */
+/* PokéDex — Poké Ball palette: black, red, white. Overlays use liquid glass. */
 :root {
   --red: #E3350D;
   --red-hi: #FF5A36;
@@ -335,7 +335,56 @@ button { cursor: pointer; background: none; border: 0; }
 .fact.wide { grid-column: 1 / -1; }
 .stars { color: var(--red-hi); letter-spacing: 2px; }
 .dex-entry { margin-top: 14px; padding: 20px; border-radius: var(--r-lg); background: var(--white); color: var(--black); line-height: 1.6; font-weight: 500; }
-.dex-entry span { display: block; font-size: 11px; font-weight: 800; color: var(--red); text-transform: uppercase; letter-spacing: .09em; margin-bottom: 8px; }
+.dex-entry-head { display: flex; justify-content: space-between; align-items: baseline; }
+.dex-entry-head span { font-size: 11px; font-weight: 800; color: var(--red); text-transform: uppercase; letter-spacing: .09em; }
+.dex-entry-head small { font-size: 12px; font-weight: 700; color: #77777d; }
+.dex-entry h3 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; margin: 10px 0 8px; }
+.traits { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.traits span { padding: 5px 11px; border-radius: 999px; background: var(--black); color: var(--white); font-size: 12px; font-weight: 600; }
+.traits span:first-child { background: var(--red); }
+.persona { color: #1f1f22; }
+.flavor { margin-top: 16px; padding-top: 14px; border-top: 1px dashed rgba(0, 0, 0, .18); }
+.flavor h3 { margin-top: 0; font-size: 14px; }
+.flavor p { color: #4a4a50; font-style: italic; }
+
+/* ---------- pokédex ---------- */
+.ring { color: inherit; }
+a.ring { display: block; border-radius: 20px; }
+.dex-progress { margin-top: 18px; padding: 18px 20px; border-radius: var(--r-lg); background: var(--ink); border: 1px solid var(--line); }
+.dex-progress-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.dex-progress b { font-size: 32px; font-weight: 800; letter-spacing: -.03em; }
+.dex-progress b small { font-size: 16px; color: var(--muted); font-weight: 600; letter-spacing: 0; }
+.meter { height: 10px; margin-top: 12px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.meter i { display: block; height: 100%; width: var(--p); min-width: 4px; border-radius: inherit; background: linear-gradient(90deg, var(--red), var(--red-hi)); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 16px; padding: 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
+.seg button { height: 42px; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--muted); transition: background .2s, color .2s; }
+.seg button.on { background: var(--white); color: var(--black); }
+.gen-chips { display: flex; gap: 8px; overflow-x: auto; margin: 12px -18px 0; padding: 0 18px 4px; scrollbar-width: none; }
+.gen-chips::-webkit-scrollbar { display: none; }
+.gen-chips button { flex: none; height: 38px; padding: 0 16px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.gen-chips button.on { background: var(--red); border-color: var(--red); color: #fff; }
+.dex-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+.dex-empty { grid-column: 1 / -1; }
+.dex-cell {
+  position: relative; min-width: 0;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 26px 6px 12px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  content-visibility: auto; contain-intrinsic-size: auto 136px;
+}
+.dex-cell img { width: 74px; height: 74px; object-fit: contain; }
+.dex-cell b { max-width: 100%; margin-top: 6px; font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dex-num { position: absolute; top: 9px; left: 11px; font-size: 11px; font-weight: 700; }
+.dex-count { position: absolute; top: 7px; right: 8px; padding: 2px 7px; border-radius: 999px; background: rgba(0, 0, 0, .25); font-size: 10px; font-weight: 800; }
+.dex-cell.seen { background: var(--red); border-color: transparent; transition: transform .15s var(--ease); }
+.dex-cell.seen:active { transform: scale(.96); }
+.dex-cell.seen .dex-num { color: rgba(255, 255, 255, .85); }
+.dex-cell.seen img { filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .3)); }
+.dex-cell.unseen { background: #2A2A2F; }
+.dex-cell.unseen .dex-num { color: #8a8a91; }
+.dex-cell.unseen img { filter: brightness(0); opacity: .92; }
+.dex-cell.unseen b { color: #6a6a71; letter-spacing: .12em; }
 
 /* ---------- form ---------- */
 .form { display: flex; flex-direction: column; gap: 18px; margin-top: 20px; }
