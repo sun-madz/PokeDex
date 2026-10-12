@@ -142,23 +142,23 @@ const PokeMap = (() => {
 
   /* Several sightings at one place: a pill of Pokémon circles pointing down at the spot.
      A circle shows ×N when the same Pokémon was seen there more than once. */
-  function cluster(items, { d = 42 } = {}) {
+  function cluster(items, { d = 42, label = '' } = {}) {
     const MAX = 4;
     const shown = items.length > MAX ? items.slice(0, MAX - 1) : items;
     const extra = items.length - shown.length;
     const n = shown.length + (extra ? 1 : 0);
     const overlap = 8;
     const W = n * d - (n - 1) * overlap + 14;
-    const H = d + 14 + 18;
+    const H = d + 14 + 18 + (label ? 22 : 0);
     const balls = shown.map((it) => {
       const safe = String(it.src || '').replace(/"/g, '&quot;');
       return `<span class="c-ball${it.shiny ? ' shiny' : ''}">${safe ? `<img src="${safe}" alt="">` : BALL}${it.count > 1 ? `<em>×${it.count}</em>` : ''}</span>`;
     }).join('') + (extra ? `<span class="c-ball c-more">+${extra}</span>` : '');
     return L.divIcon({
       className: 'poke-cluster',
-      html: `<span class="cluster" style="--d:${d}px;--o:${overlap}px"><span class="cluster-pill">${balls}</span><span class="cluster-tail"></span><span class="cluster-dot"></span></span>`,
-      iconSize: [W, H],
-      iconAnchor: [W / 2, H],
+      html: `<span class="cluster${label ? ' merged' : ''}" style="--d:${d}px;--o:${overlap}px">${label ? `<span class="cluster-label">${label}</span>` : ''}<span class="cluster-pill">${balls}</span><span class="cluster-tail"></span><span class="cluster-dot"></span></span>`,
+      iconSize: [Math.max(W, label ? 84 : 0), H],
+      iconAnchor: [Math.max(W, label ? 84 : 0) / 2, H],
       popupAnchor: [0, -H + 4],
     });
   }

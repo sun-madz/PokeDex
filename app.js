@@ -776,6 +776,101 @@
       </div>`;
   }
 
+  /* Zoom-aware place markers: places whose bubbles would overlap on screen merge into one
+     bubble ("3 places"). Tapping a merged bubble zooms in until they separate. */
+  function placeLayer(map, groups, { interactive = true, d = 42 } = {}) {
+    const lg = L.layerGroup().addTo(map);
+    let byPlace = {};
+
+    const speciesOf = (gs) => {
+      const m = new Map();
+      gs.forEach((g) => g.species.forEach((e) => {
+        const x = m.get(e.s.pokemon.id);
+        if (x) { x.count += e.count; x.shiny = x.shiny || e.shiny; }
+        else m.set(e.s.pokemon.id, { s: e.s, count: e.count, shiny: e.shiny });
+      }));
+      return [...m.values()].sort((a, b) => b.count - a.count);
+    };
+
+    function redraw() {
+      lg.clearLayers();
+      byPlace = {};
+      if (!groups.length) return;
+      // biggest places first so they anchor the merged bubbles
+      const order = groups.slice().sort((a, b) => b.logs.length - a.logs.length);
+      const clusters = [];
+      order.forEach((g) => {
+        const pt = map.latLngToLayerPoint([g.lat, g.lng]);
+        const hit = clusters.find((c) => Math.abs(c.pt.x - pt.x) < 96 && Math.abs(c.pt.y - pt.y) < 64);
+        if (hit) hit.places.push(g);
+        else clusters.push({ pt, places: [g] });
+      });
+
+      clusters.forEach((c) => {
+        const places = c.places;
+        if (places.length === 1) {
+          const g = places[0];
+          const m = L.marker([g.lat, g.lng], {
+            icon: PokeMap.cluster(g.species.map((e) => ({ src: artOf(e.s), count: e.count, shiny: e.shiny })), { d }),
+            interactive, keyboard: interactive,
+            zIndexOffset: g.logs.length * 10,
+          });
+          if (interactive) {
+            if (g.logs.length === 1) {
+              const s = g.logs[0];
+              m.bindPopup(`
+                <a class="map-pop" href="#/s/${encodeURIComponent(s.id)}">
+                  <img src="${esc(artOf(s))}" alt="">
+                  <div>
+                    <b>${esc(s.pokemon.name)}</b>
+                    ${s.nickname ? `<small>“${esc(s.nickname)}”</small>` : ''}
+                    <small>${fmtDate(s.seenAt)}${s.location ? ' · ' + esc(s.location) : ''}</small>
+                  </div>
+                  <span class="arrow">${icons.play}</span>
+                </a>`, { maxWidth: 280, closeButton: false });
+            } else {
+              m.bindPopup(placePopup(g), { maxWidth: 290, closeButton: false });
+            }
+          }
+          m.addTo(lg);
+          byPlace[g.idx] = m;
+          return;
+        }
+        // merged: centre on the average of its places, show every Pokémon, label with the place count
+        const lat = places.reduce((a, g) => a + g.lat, 0) / places.length;
+        const lng = places.reduce((a, g) => a + g.lng, 0) / places.length;
+        const sp = speciesOf(places);
+        const m = L.marker([lat, lng], {
+          icon: PokeMap.cluster(sp.map((e) => ({ src: artOf(e.s), count: e.count, shiny: e.shiny })), { d, label: `${places.length} places` }),
+          interactive, keyboard: interactive,
+          zIndexOffset: 1000,
+        });
+        if (interactive) {
+          m.on('click', () => {
+            const bounds = L.latLngBounds(places.map((g) => [g.lat, g.lng]));
+            map.flyToBounds(bounds.pad(0.35), { maxZoom: 18, duration: 0.7 });
+          });
+        }
+        m.addTo(lg);
+        places.forEach((g) => { byPlace[g.idx] = m; });
+      });
+    }
+
+    // open a place's own bubble, zooming further in if it's still merged with neighbours
+    function openPlace(idx, tries = 0) {
+      const m = byPlace[idx];
+      if (!m) return;
+      if (m.getPopup()) { m.openPopup(); return; }
+      if (tries > 3) return;
+      const g = groups.find((x) => x.idx === idx);
+      map.setView([g.lat, g.lng], Math.min(map.getMaxZoom(), map.getZoom() + 2));
+      setTimeout(() => openPlace(idx, tries + 1), 120);
+    }
+
+    map.on('zoomend', redraw);
+    return { redraw, openPlace };
+  }
+
   async function renderMap(focusId) {
     const pinned = sightings.filter(hasCoords);
     const unplaced = sightings.filter((s) => !hasCoords(s));
@@ -849,41 +944,18 @@
     const card = el.closest('.map-card');
     map.on('popupopen', () => card.classList.add('pop-open'));
     map.on('popupclose', () => card.classList.remove('pop-open'));
-    // one marker per place: a standing Pokémon for a single sighting, a bubble for several
-    const placeMarkers = {};
-    const markers = {};
-    groups.forEach((g) => {
-      let m;
-      if (g.logs.length === 1) {
-        const s = g.logs[0];
-        m = L.marker([g.lat, g.lng], { icon: PokeMap.cluster([{ src: artOf(s), count: 1, shiny: s.shiny }]) })
-          .bindPopup(`
-            <a class="map-pop" href="#/s/${encodeURIComponent(s.id)}">
-              <img src="${esc(artOf(s))}" alt="">
-              <div>
-                <b>${esc(s.pokemon.name)}</b>
-                ${s.nickname ? `<small>“${esc(s.nickname)}”</small>` : ''}
-                <small>${fmtDate(s.seenAt)}${s.location ? ' · ' + esc(s.location) : ''}</small>
-              </div>
-              <span class="arrow">${icons.play}</span>
-            </a>`, { maxWidth: 280, closeButton: false });
-      } else {
-        m = L.marker([g.lat, g.lng], {
-          icon: PokeMap.cluster(g.species.map((e) => ({ src: artOf(e.s), count: e.count, shiny: e.shiny }))),
-          zIndexOffset: 500,
-        }).bindPopup(placePopup(g), { maxWidth: 290, closeButton: false });
-      }
-      m.addTo(map);
-      placeMarkers[g.idx] = m;
-      g.logs.forEach((s) => { markers[s.id] = m; });
-    });
+    const layer = placeLayer(map, groups, { interactive: true });
     fitPins(map, pinned);
+    layer.redraw();
     if (!pinned.length) {
       el.insertAdjacentHTML('beforeend', `<div class="map-hint glass">No pins yet — add a location when you log a sighting.</div>`);
     }
-    if (focusId && markers[focusId]) {
-      map.setView(markers[focusId].getLatLng(), 16);
-      setTimeout(() => markers[focusId].openPopup(), 250);
+    if (focusId) {
+      const g = groups.find((x) => x.logs.some((l) => l.id === focusId));
+      if (g) {
+        map.setView([g.lat, g.lng], 18);
+        setTimeout(() => layer.openPlace(g.idx), 300);
+      }
     }
 
     const placesEl = view.querySelector('.places');
@@ -891,10 +963,9 @@
       const b = e.target.closest('[data-place]');
       if (!b) return;
       const g = groups[Number(b.dataset.place)];
-      const m = placeMarkers[g.idx];
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      map.flyTo([g.lat, g.lng], Math.max(map.getZoom(), 17), { duration: 0.8 });
-      map.once('moveend', () => m.openPopup());
+      map.flyTo([g.lat, g.lng], Math.max(map.getZoom(), 18), { duration: 0.8 });
+      map.once('moveend', () => setTimeout(() => layer.openPlace(g.idx), 60));
     });
 
     $('#fitBtn').addEventListener('click', () => (pinned.length ? fitPins(map, pinned) : map.setView(PokeMap.DEFAULT_CENTER, 11)));
@@ -1079,11 +1150,9 @@
     if (pinned.length && PokeMap.available()) {
       const dm = PokeMap.create($('#detailMap'), { interactive: false, center: [pinned[0].lat, pinned[0].lng], zoom: 15 });
       activeMaps.push(dm);
-      places.forEach((g) => L.marker([g.lat, g.lng], {
-        icon: PokeMap.cluster(g.species.map((e) => ({ src: artOf(e.s), count: e.count, shiny: e.shiny })), { d: 36 }),
-        interactive: false, keyboard: false,
-      }).addTo(dm));
+      const dl = placeLayer(dm, places, { interactive: false, d: 36 });
       fitPins(dm, places, 15);
+      dl.redraw();
     }
 
     // came here from a specific older sighting (map pin, Pokédex…) — bring it into view
