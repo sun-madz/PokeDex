@@ -217,7 +217,6 @@
         <header class="top">
           <h1 class="hello">Hi, ${esc(trainerName())}</h1>
           <div class="top-actions">
-            <button class="icon-btn" id="searchBtn" aria-label="Search sightings">${icons.search}</button>
             <a class="icon-btn" href="#/map" aria-label="Sightings map">${icons.map}</a>
           </div>
         </header>
@@ -228,11 +227,6 @@
         </div>
       </section>
 
-      <div class="search-wrap hidden" id="searchWrap">
-        <label class="search">${icons.search}
-          <input id="searchInput" type="search" placeholder="Search name, nickname, type, place…" aria-label="Search sightings">
-        </label>
-      </div>
 
 
       <div class="section-head">
@@ -256,7 +250,6 @@
       document.querySelectorAll('.ring .bar').forEach((b) => b.setAttribute('stroke-dashoffset', b.dataset.off));
     });
 
-    let query = '';
     const update = () => {
       const [from, to] = rangeBounds();
       const logs = sightings
@@ -264,9 +257,7 @@
           const d = s.seenAt || '';
           if (from && d < from) return false;
           if (to && d > to) return false;
-          if (!query) return true;
-          return [s.pokemon.name, s.pokemon.slug, s.nickname, s.description, s.location, s.pokemon.region, ...s.pokemon.types]
-            .join(' ').toLowerCase().includes(query);
+          return true;
         })
         .sort(byDateDesc);
       // group the matching logs by Pokémon
@@ -285,20 +276,10 @@
         ? byDateDesc(a.latest, b.latest)
         : (a.oldest.seenAt || '').localeCompare(b.oldest.seenAt || '') || (a.oldest.createdAt || 0) - (b.oldest.createdAt || 0)));
       $('#listCount').textContent = items.length;
-      drawList(items, !!(query || from || to));
+      drawList(items, !!(from || to));
     };
     update();
 
-    $('#searchBtn').addEventListener('click', () => {
-      const w = $('#searchWrap');
-      w.classList.toggle('hidden');
-      if (!w.classList.contains('hidden')) $('#searchInput').focus();
-      else { $('#searchInput').value = ''; query = ''; update(); }
-    });
-    $('#searchInput').addEventListener('input', (e) => {
-      query = e.target.value.trim().toLowerCase();
-      update();
-    });
     $('#dateChips').addEventListener('click', (e) => {
       const b = e.target.closest('[data-range]');
       if (!b) return;
@@ -344,7 +325,7 @@
     const list = $('#list');
     if (!items.length) {
       list.innerHTML = filtered
-        ? `<div class="empty"><h3>No sightings here</h3><p>Nothing matches this search or date range — try widening it.</p></div>`
+        ? `<div class="empty"><h3>No sightings here</h3><p>Nothing was sighted in this date range — try widening it.</p></div>`
         : `<div class="empty">
              <div class="ball">${POKEBALL}</div>
              <h3>No sightings yet</h3>
@@ -457,12 +438,15 @@
       <div class="dex-entry-head"><span>Pokédex entry</span><small>${dexNo(p.id)}</small></div>
       <h3>Personality</h3>
       <div class="traits">${per.traits.map((t) => `<span>${esc(t)}</span>`).join('')}</div>
-      <p class="persona">${esc(per.text)}</p>
-      ${p.flavor ? `<div class="flavor"><h3>Field notes</h3><p>${esc(p.flavor)}</p></div>` : ''}`;
+      <div class="entry-body">
+        <p class="persona">${esc(per.text)}</p>
+        ${p.flavor ? `<div class="flavor"><h3>Field notes</h3><p>${esc(p.flavor)}</p></div>` : ''}
+      </div>
+      <button type="button" class="entry-toggle" aria-expanded="false">Read more <span aria-hidden="true">▾</span></button>`;
   }
 
   /* ---------- pokédex ---------- */
-  const dexFilter = { status: 'all', gen: 0 };
+  const dexFilter = { status: 'all', gen: 0, q: '' };
 
   async function renderDex() {
     const seenMap = new Map(); // id -> { s: latest sighting, count }
@@ -490,6 +474,10 @@
         <div class="meter"><i style="--p:${pct.toFixed(2)}%"></i></div>
       </div>
 
+      <label class="search dex-search">${icons.search}
+        <input id="dexSearch" type="search" placeholder="Search name or number…" value="${esc(dexFilter.q)}" aria-label="Search the Pokédex" autocomplete="off" spellcheck="false">
+      </label>
+
       <div class="seg" role="tablist" aria-label="Show">
         ${[['all', 'All'], ['seen', 'Sighted'], ['missing', 'Missing']].map(([k, l]) =>
           `<button role="tab" data-status="${k}" class="${dexFilter.status === k ? 'on' : ''}" aria-selected="${dexFilter.status === k}">${l}</button>`).join('')}
@@ -502,15 +490,27 @@
       <div class="dex-grid" id="dexGrid"></div>
     `);
 
+    const dexMatch = (m) => {
+      if (dexFilter.gen && Api.genOfId(m.id) !== dexFilter.gen) return false;
+      if (dexFilter.status === 'seen' && !seenMap.has(m.id)) return false;
+      if (dexFilter.status === 'missing' && seenMap.has(m.id)) return false;
+      const q = dexFilter.q.trim().toLowerCase().replace(/^#/, '');
+      if (!q) return true;
+      if (/^\d+$/.test(q)) return String(m.id).startsWith(String(Number(q))) || String(m.id).padStart(3, '0').startsWith(q);
+      const e = seenMap.get(m.id);
+      const hay = [m.slug, m.slug.replace(/-/g, ' '), e && e.s.pokemon.name, ...(e ? sightings.filter((x) => x.pokemon.id === m.id).map((x) => x.nickname) : [])]
+        .filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q) || hay.includes(Api.slugify(q));
+    };
     const draw = () => {
-      const items = list.filter((m) => {
-        if (dexFilter.gen && Api.genOfId(m.id) !== dexFilter.gen) return false;
-        if (dexFilter.status === 'seen') return seenMap.has(m.id);
-        if (dexFilter.status === 'missing') return !seenMap.has(m.id);
-        return true;
-      });
       const grid = $('#dexGrid');
+      if (!grid) return; // left the Pokédex before a pending search ran
+      const items = list.filter(dexMatch);
       if (!items.length) {
+        if (dexFilter.q.trim()) {
+          grid.innerHTML = `<div class="empty dex-empty"><h3>No matches</h3><p>Nothing in this view matches “${esc(dexFilter.q.trim())}”.</p></div>`;
+          return;
+        }
         grid.innerHTML = `<div class="empty dex-empty"><h3>${dexFilter.status === 'seen' ? 'None sighted here yet' : 'All caught here!'}</h3><p>${dexFilter.status === 'seen' ? 'Log a sighting and it will light up.' : 'Every Pokémon in this view has been sighted.'}</p></div>`;
         return;
       }
@@ -544,6 +544,12 @@
       draw();
       window.dispatchEvent(new Event('scroll'));
     }));
+    let dexTimer;
+    $('#dexSearch').addEventListener('input', (e) => {
+      dexFilter.q = e.target.value;
+      clearTimeout(dexTimer);
+      dexTimer = setTimeout(() => { draw(); window.dispatchEvent(new Event('scroll')); }, 120);
+    });
     view.querySelectorAll('[data-gen]').forEach((b) => b.addEventListener('click', () => {
       dexFilter.gen = Number(b.dataset.gen);
       view.querySelectorAll('[data-gen]').forEach((x) => x.classList.toggle('on', x === b));
@@ -566,12 +572,7 @@
     const bubble = rail.querySelector('.scrub-bubble');
     const maxScroll = () => Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
     const labelAt = (f) => {
-      const shown = list.filter((m) => {
-        if (dexFilter.gen && Api.genOfId(m.id) !== dexFilter.gen) return false;
-        if (dexFilter.status === 'seen') return seenMap.has(m.id);
-        if (dexFilter.status === 'missing') return !seenMap.has(m.id);
-        return true;
-      });
+      const shown = list.filter(dexMatch);
       if (!shown.length) return '';
       return dexNo(shown[Math.min(shown.length - 1, Math.round(f * (shown.length - 1)))].id);
     };
@@ -698,7 +699,7 @@
       used.set(key, n + 1);
       const angle = n * 2.4;
       const ll = n ? [s.lat + Math.cos(angle) * 0.00012 * Math.sqrt(n), s.lng + Math.sin(angle) * 0.00012 * Math.sqrt(n)] : [s.lat, s.lng];
-      const m = L.marker(ll, { icon: PokeMap.pin(artOf(s), { shiny: s.shiny, size: interactive ? 68 : 46 }), interactive, keyboard: interactive });
+      const m = L.marker(ll, { icon: PokeMap.cluster([{ src: artOf(s), count: 1, shiny: s.shiny }], { d: interactive ? 42 : 36 }), interactive, keyboard: interactive });
       if (interactive) {
         m.bindPopup(`
           <a class="map-pop" href="#/s/${encodeURIComponent(s.id)}">
@@ -855,7 +856,7 @@
       let m;
       if (g.logs.length === 1) {
         const s = g.logs[0];
-        m = L.marker([g.lat, g.lng], { icon: PokeMap.pin(artOf(s), { shiny: s.shiny, size: 68 }) })
+        m = L.marker([g.lat, g.lng], { icon: PokeMap.cluster([{ src: artOf(s), count: 1, shiny: s.shiny }]) })
           .bindPopup(`
             <a class="map-pop" href="#/s/${encodeURIComponent(s.id)}">
               <img src="${esc(artOf(s))}" alt="">
@@ -980,6 +981,7 @@
     const total = p.stats.reduce((a, b) => a + b.value, 0);
     const maxStat = Math.max(150, ...p.stats.map((x) => x.value));
     const pinned = logs.filter(hasCoords);
+    const places = groupByPlace(pinned);
     const first = logs[logs.length - 1];
 
     mount(`
@@ -1043,7 +1045,7 @@
           <a class="map-card detail" href="#/map/${encodeURIComponent((pinned.find((l) => l.id === focus.id) || pinned[0]).id)}" aria-label="See on the map">
             <div class="map-el" id="detailMap"></div>
             <div class="map-card-label glass">
-              <span>${icons.pin} ${pinned.length === 1 ? esc(pinned[0].location || 'View on map') : `Seen in ${pinned.length} places`}</span>
+              <span>${icons.pin} ${places.length === 1 ? esc(places[0].label || 'View on map') : `Seen in ${places.length} places`}</span>
               <span class="go">${icons.play}</span>
             </div>
           </a>` : ''}
@@ -1065,10 +1067,9 @@
 
       <section class="facts">
         <div class="fact"><span>Rarity</span><b class="stars" aria-label="${p.rarity.tier} of 5">${stars(p.rarity.tier)}</b></div>
-        <div class="fact"><span>Capture rate</span><b>${p.captureRate} / 255</b></div>
         <div class="fact"><span>Region</span><b>${esc(p.region)}</b></div>
+        <div class="fact"><span>Generation</span><b>Gen ${p.genRoman}</b></div>
         <div class="fact"><span>Habitat</span><b>${esc(p.habitat || 'Unknown')}</b></div>
-        <div class="fact wide"><span>Abilities</span><b>${p.abilities.map((a) => esc(a.name) + (a.hidden ? ' <em class="muted">(hidden)</em>' : '')).join(' · ')}</b></div>
         <div class="fact wide"><span>Status</span><b>${
           p.isMythical ? 'Mythical Pokémon' : p.isLegendary ? 'Legendary Pokémon' : p.isBaby ? 'Baby Pokémon' : 'Regular Pokémon'
         }</b></div>
@@ -1078,8 +1079,11 @@
     if (pinned.length && PokeMap.available()) {
       const dm = PokeMap.create($('#detailMap'), { interactive: false, center: [pinned[0].lat, pinned[0].lng], zoom: 15 });
       activeMaps.push(dm);
-      addPins(dm, pinned, { interactive: false });
-      fitPins(dm, pinned, 15);
+      places.forEach((g) => L.marker([g.lat, g.lng], {
+        icon: PokeMap.cluster(g.species.map((e) => ({ src: artOf(e.s), count: e.count, shiny: e.shiny })), { d: 36 }),
+        interactive: false, keyboard: false,
+      }).addTo(dm));
+      fitPins(dm, places, 15);
     }
 
     // came here from a specific older sighting (map pin, Pokédex…) — bring it into view
@@ -1099,6 +1103,16 @@
         if (box) box.innerHTML = dexEntryHTML(info);
       }).catch(() => {});
     }
+
+    // Pokédex entry: collapsed until you tap "Read more"
+    $('#dexEntry').addEventListener('click', (e) => {
+      const t = e.target.closest('.entry-toggle');
+      if (!t) return;
+      const box = $('#dexEntry');
+      const open = box.classList.toggle('open');
+      t.setAttribute('aria-expanded', open);
+      t.innerHTML = open ? 'Show less <span aria-hidden="true">▴</span>' : 'Read more <span aria-hidden="true">▾</span>';
+    });
 
     view.querySelector('.timeline').addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-del]');
@@ -1130,7 +1144,7 @@
     };
     let locMap = null;
     let locMarker = null;
-    const pinIcon = () => PokeMap.pin(state.pokemon ? ((shinyEl.checked && state.pokemon.artworkShiny) || state.pokemon.artwork) : null, { shiny: shinyEl.checked });
+    const pinIcon = () => PokeMap.cluster([{ src: state.pokemon ? ((shinyEl.checked && state.pokemon.artworkShiny) || state.pokemon.artwork) : null, count: 1, shiny: shinyEl.checked }]);
 
     mount(`
       <header class="topbar">

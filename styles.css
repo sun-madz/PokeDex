@@ -785,6 +785,16 @@ a.ring { display: block; border-radius: 20px; }
 .map-count, .map-tools { transition: opacity .2s; }
 .pop-open .map-count, .pop-open .map-tools { opacity: 0; pointer-events: none; }
 
+/* Pokédex entry: collapsed by default */
+.entry-body { position: relative; max-height: 4.9em; overflow: hidden; transition: max-height .45s var(--ease); }
+.entry-body::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2.4em; background: linear-gradient(rgba(247, 247, 245, 0), var(--white)); transition: opacity .3s; }
+.dex-entry.open .entry-body { max-height: 60em; }
+.dex-entry.open .entry-body::after { opacity: 0; }
+.entry-toggle { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border-radius: 999px; background: var(--black); color: var(--white); font-size: 13px; font-weight: 700; }
+.entry-toggle span { color: var(--red-hi); }
+
+.dex-search { margin-top: 16px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
