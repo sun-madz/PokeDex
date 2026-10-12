@@ -234,14 +234,6 @@
         </label>
       </div>
 
-      <a class="map-card mini" href="#/map" aria-label="Open sightings map">
-        <div class="map-el" id="homeMap"></div>
-        <div class="map-card-label glass">
-          <span>${icons.map} Sightings map</span>
-          <small>${sightings.filter(hasCoords).length} pinned</small>
-          <span class="go">${icons.play}</span>
-        </div>
-      </a>
 
       <div class="section-head">
         <h2>Your Pokémon</h2>
@@ -296,7 +288,6 @@
       drawList(items, !!(query || from || to));
     };
     update();
-    drawMiniMap($('#homeMap'), sightings.filter(hasCoords));
 
     $('#searchBtn').addEventListener('click', () => {
       const w = $('#searchWrap');
@@ -741,10 +732,55 @@
     fitPins(map, list, 14);
   }
 
+  /* sightings within ~75 m of each other count as the same place */
+  const distM = (aLat, aLng, bLat, bLng) => {
+    const x = (bLng - aLng) * Math.cos(((aLat + bLat) / 2) * Math.PI / 180);
+    return Math.sqrt(x * x + (bLat - aLat) * (bLat - aLat)) * 111320;
+  };
+  function groupByPlace(list, meters = 75) {
+    const groups = [];
+    list.slice().sort(byDateDesc).forEach((s) => {
+      let g = groups.find((x) => distM(x.lat, x.lng, s.lat, s.lng) <= meters);
+      if (!g) { g = { lat: s.lat, lng: s.lng, label: '', logs: [] }; groups.push(g); }
+      g.logs.push(s);
+      if (!g.label && s.location) g.label = s.location;
+    });
+    groups.forEach((g, i) => {
+      g.idx = i;
+      g.lat = g.logs.reduce((a, s) => a + s.lat, 0) / g.logs.length;
+      g.lng = g.logs.reduce((a, s) => a + s.lng, 0) / g.logs.length;
+      const bySpecies = new Map();
+      g.logs.forEach((s) => {
+        const e = bySpecies.get(s.pokemon.id);
+        if (e) e.count++; else bySpecies.set(s.pokemon.id, { s, count: 1, shiny: s.shiny });
+        if (s.shiny) bySpecies.get(s.pokemon.id).shiny = true;
+      });
+      g.species = [...bySpecies.values()];
+    });
+    return groups;
+  }
+
+  function placePopup(g) {
+    return `
+      <div class="place-pop">
+        <b class="pp-title">${icons.pin}${esc(g.label || 'Pinned spot')}</b>
+        <small class="pp-sub">${g.logs.length} sightings · ${g.species.length} Pokémon</small>
+        ${g.species.map((e) => `
+          <a class="pp-row" href="#/s/${encodeURIComponent(e.s.id)}">
+            <img src="${esc(artOf(e.s))}" alt="">
+            <span>${esc(e.s.pokemon.name)}${e.shiny ? ' <i class="pp-shiny">✦</i>' : ''}</span>
+            ${e.count > 1 ? `<em>×${e.count}</em>` : ''}
+            <span class="arrow">${icons.play}</span>
+          </a>`).join('')}
+      </div>`;
+  }
+
   async function renderMap(focusId) {
     const pinned = sightings.filter(hasCoords);
     const unplaced = sightings.filter((s) => !hasCoords(s));
     const placeable = unplaced.filter((s) => s.location);
+    const groups = groupByPlace(pinned);
+    const ordered = groups.slice().sort((a, b) => b.logs.length - a.logs.length || byDateDesc(a.logs[0], b.logs[0]));
 
     mount(`
       <header class="topbar">
@@ -755,12 +791,35 @@
 
       <div class="map-card big">
         <div class="map-el" id="bigMap"></div>
-        <span class="map-count glass">${pinned.length} pinned</span>
+        <span class="map-count glass">${groups.length} place${groups.length === 1 ? '' : 's'} · ${pinned.length} sighting${pinned.length === 1 ? '' : 's'}</span>
         <div class="map-tools">
           <button class="icon-btn glass" id="fitBtn" aria-label="Show all pins">${icons.expand}</button>
           <button class="icon-btn glass" id="meBtn" aria-label="Show my location">${icons.target}</button>
         </div>
       </div>
+
+      ${groups.length ? `
+        <section class="places">
+          <div class="section-head"><h2>Places</h2><span class="count">${groups.length}</span></div>
+          ${ordered.map((g) => `
+            <article class="place-card">
+              <button type="button" class="place-head" data-place="${g.idx}" aria-label="Show ${esc(g.label || 'this spot')} on the map">
+                <span class="place-ico">${icons.pin}</span>
+                <span class="place-text">
+                  <b>${esc(g.label || 'Pinned spot')}</b>
+                  <small>${g.logs.length} sighting${g.logs.length === 1 ? '' : 's'} · last ${fmtDate(g.logs[0].seenAt)}</small>
+                </span>
+                <span class="mini-icon">${icons.target}</span>
+              </button>
+              <div class="place-mons">
+                ${g.species.map((e) => `
+                  <a class="place-mon" href="#/s/${encodeURIComponent(e.s.id)}">
+                    <span class="pm-ball${e.shiny ? ' shiny' : ''}"><img src="${esc(artOf(e.s))}" alt="" loading="lazy">${e.count > 1 ? `<em>×${e.count}</em>` : ''}</span>
+                    <b>${esc(e.s.pokemon.name)}</b>
+                  </a>`).join('')}
+              </div>
+            </article>`).join('')}
+        </section>` : ''}
 
       ${unplaced.length ? `
         <section class="panel unplaced">
@@ -786,7 +845,37 @@
     const map = PokeMap.create(el, { interactive: true, zoom: 11 });
     activeMaps.push(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
-    const markers = addPins(map, pinned);
+    const card = el.closest('.map-card');
+    map.on('popupopen', () => card.classList.add('pop-open'));
+    map.on('popupclose', () => card.classList.remove('pop-open'));
+    // one marker per place: a standing Pokémon for a single sighting, a bubble for several
+    const placeMarkers = {};
+    const markers = {};
+    groups.forEach((g) => {
+      let m;
+      if (g.logs.length === 1) {
+        const s = g.logs[0];
+        m = L.marker([g.lat, g.lng], { icon: PokeMap.pin(artOf(s), { shiny: s.shiny, size: 68 }) })
+          .bindPopup(`
+            <a class="map-pop" href="#/s/${encodeURIComponent(s.id)}">
+              <img src="${esc(artOf(s))}" alt="">
+              <div>
+                <b>${esc(s.pokemon.name)}</b>
+                ${s.nickname ? `<small>“${esc(s.nickname)}”</small>` : ''}
+                <small>${fmtDate(s.seenAt)}${s.location ? ' · ' + esc(s.location) : ''}</small>
+              </div>
+              <span class="arrow">${icons.play}</span>
+            </a>`, { maxWidth: 280, closeButton: false });
+      } else {
+        m = L.marker([g.lat, g.lng], {
+          icon: PokeMap.cluster(g.species.map((e) => ({ src: artOf(e.s), count: e.count, shiny: e.shiny }))),
+          zIndexOffset: 500,
+        }).bindPopup(placePopup(g), { maxWidth: 290, closeButton: false });
+      }
+      m.addTo(map);
+      placeMarkers[g.idx] = m;
+      g.logs.forEach((s) => { markers[s.id] = m; });
+    });
     fitPins(map, pinned);
     if (!pinned.length) {
       el.insertAdjacentHTML('beforeend', `<div class="map-hint glass">No pins yet — add a location when you log a sighting.</div>`);
@@ -795,6 +884,17 @@
       map.setView(markers[focusId].getLatLng(), 16);
       setTimeout(() => markers[focusId].openPopup(), 250);
     }
+
+    const placesEl = view.querySelector('.places');
+    if (placesEl) placesEl.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-place]');
+      if (!b) return;
+      const g = groups[Number(b.dataset.place)];
+      const m = placeMarkers[g.idx];
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      map.flyTo([g.lat, g.lng], Math.max(map.getZoom(), 17), { duration: 0.8 });
+      map.once('moveend', () => m.openPopup());
+    });
 
     $('#fitBtn').addEventListener('click', () => (pinned.length ? fitPins(map, pinned) : map.setView(PokeMap.DEFAULT_CENTER, 11)));
     let meDot = null;
