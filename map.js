@@ -1,5 +1,5 @@
 /* PokéDex — maps and place search.
-   Map tiles: OpenStreetMap data via CARTO's dark basemap (free, no key).
+   Map tiles: OpenStreetMap (free, no key), recoloured dark in CSS.
    Place search & reverse lookup: Photon by Komoot (free, OSM-based, no key). */
 const Geo = (() => {
   const PHOTON = 'https://photon.komoot.io';
@@ -42,8 +42,9 @@ const Geo = (() => {
 })();
 
 const PokeMap = (() => {
-  const TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-  const ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
+  // Standard OpenStreetMap tiles (no key). They're darkened in styles.css to match the app.
+  const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  const ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
   const DEFAULT_CENTER = [3.139, 101.6869]; // Kuala Lumpur, used until you have a pin
   const BALL = '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46" fill="#F7F7F5"/><path d="M4 50a46 46 0 0 1 92 0z" fill="#E3350D"/><rect x="4" y="46" width="92" height="8" fill="#0A0A0B"/><circle cx="50" cy="50" r="46" fill="none" stroke="#0A0A0B" stroke-width="6"/><circle cx="50" cy="50" r="15" fill="#F7F7F5" stroke="#0A0A0B" stroke-width="6"/></svg>';
 
@@ -60,7 +61,7 @@ const PokeMap = (() => {
       keyboard: interactive,
       tap: interactive,
     }).setView(center || DEFAULT_CENTER, zoom);
-    L.tileLayer(TILES, { attribution: ATTR, subdomains: 'abcd', maxZoom: 19, detectRetina: true }).addTo(map);
+    L.tileLayer(TILES, { attribution: ATTR, maxZoom: 19, className: 'poke-tiles' }).addTo(map);
     map.attributionControl.setPrefix(false);
     requestAnimationFrame(() => map.invalidateSize());
     return map;

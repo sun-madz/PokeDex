@@ -535,6 +535,7 @@ a.ring { display: block; border-radius: 20px; }
 .map-hint { position: absolute; left: 50%; bottom: 18px; z-index: 800; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; text-align: center; }
 
 /* Leaflet, re-skinned to match */
+.poke-tiles { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.55); }
 .leaflet-container { font-family: var(--font); background: #1a1a1d; }
 .leaflet-control-attribution { background: rgba(10, 10, 11, .65) !important; color: #8a8a91 !important; font-size: 10px !important; border-radius: 10px 0 0 0; }
 .leaflet-control-attribution a { color: #b5b5bb !important; }
